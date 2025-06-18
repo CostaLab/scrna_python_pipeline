@@ -272,7 +272,7 @@ del(scrna_hvgs)
 print("Saving the preprocessed data.")
 scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
 del scrna.obs["scrublet_predicted_doublet"]
-scrna = sc.read_h5ad(output+"/scrna_preprocessed_data.h5ad")
+scrna.write_h5ad(filename = output+"scrna_preprocessed_data.h5ad")
 scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
 del scrna.obs["scrublet_predicted_doublet_str"]
 
