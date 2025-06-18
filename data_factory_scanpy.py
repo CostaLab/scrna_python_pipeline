@@ -177,14 +177,14 @@ plt.close()
 print("Removing doublets if so desired.")
 if doublet_switch:
     print("Removing doublets.")
-    scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :]
+    scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
 
 
 print("Generating QC figures after quality control.")
 qc_vars = ["total_counts", "n_genes_by_counts", "pct_counts_mito", "pct_counts_ribo", "scrublet_score"]
 for var in qc_vars:
     plt.figure(figsize = (fig_width, 5))
-    ax = sns.violinplot( x = "batch", y = var, a = scrna.obs, density_norm = "width", inner = "box", cut = 0)
+    ax = sns.violinplot(x = "batch", y = var, data = scrna.obs, density_norm = "width", inner = "box", cut = 0)
     ax.set_xlabel("Sample")
     ax.set_ylabel(y_labels.get(var, var))
     ax.set_title(f"{y_labels.get(var, var)} by Sample")
