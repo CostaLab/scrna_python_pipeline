@@ -57,6 +57,7 @@ os.makedirs(output, exist_ok = True)
 check_numeric(MINCELLS, "MINCELLS")
 check_numeric(MINGENES, "MINGENES")
 check_numeric(MINREADS, "MINREADS")
+check_numeric(LOGREG_MAXITER, "LOGREG_MAXITER")
 
 MAXGENES         = check_numeric_or_inf(MAXGENES, "MAXGENES")
 MAXREADS         = check_numeric_or_inf(MAXREADS, "MAXREADS")
@@ -257,14 +258,15 @@ scrna_hvgs.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap"]
 print("Adding the integration information to the full object.")
 scrna.obsm["X_pca"]          = scrna_hvgs.obsm["X_pca"]
 scrna.obsm["X_umap"]         = scrna_hvgs.obsm["X_pca_umap"]
-scrna.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap"]
+scrna.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap_harmony"]
 scrna.obsm["X_pca_harmony"]  = scrna_hvgs.obsm["X_pca_harmony"]
 scrna.obsp["distances"]      = scrna_hvgs.obsp["distances"]
 scrna.obsp["connectivities"] = scrna_hvgs.obsp["connectivities"]
 scrna.uns["neighbors"]       = scrna_hvgs.uns["neighbors"]
 scrna.uns["umap"]            = scrna_hvgs.uns["umap"]
-scrna.layers["scaled_hvg"]   = scrna_hvgs.X.copy()
-scrna.varm["PCs"]            = scrna_hvgs.varm["PCs"]
+scrna.uns["scaled_hvg"]      = scrna_hvgs.X.copy()
+scrna.uns["PCs"]             = scrna_hvgs.varm["PCs"]
+del(scrna_hvgs)
 
 
 print("Saving the preprocessed data.")
@@ -278,7 +280,8 @@ for res in np.arange(0.1, 0.9, 0.1):
     key_added = f"leiden_{res:.1f}"
     print(key_added)
     sc.tl.leiden(scrna, resolution = res, key_added = key_added)
-    fig = sc.pl.umap(scrna, color = key_added, basis = "X_umap_harmony", show = False, return_fig = True)
+    # fig = sc.pl.umap(scrna, color = key_added, basis = "X_umap_harmony", show = False, return_fig = True)
+    fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = key_added, show = False, return_fig = True)
     fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.pdf"))
     fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), dpi = 300)
     plt.close(fig)
@@ -287,7 +290,7 @@ for res in np.arange(0.1, 0.9, 0.1):
     writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
     for cluster in sorted(scrna.obs[key_added].unique()):
         print("Cluster: "+str(cluster))
-        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, key_added = "degs_genes_temp")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "degs_genes_temp")
         result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = "degs_genes_temp")
         result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
         top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
@@ -308,7 +311,7 @@ for res in np.arange(0.1, 0.9, 0.1):
 print("We compare the stages.")
 stage_dir = os.path.join(output, "degs_stage")
 os.makedirs(stage_dir, exist_ok = True)
-sc.tl.rank_genes_groups(scrna, groupby = "stage", method = DEG_METHOD, key_added = "deg_genes_stage")
+sc.tl.rank_genes_groups(scrna, groupby = "stage", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_stage")
 
 
 stages = scrna.obs["stage"].unique().tolist()
