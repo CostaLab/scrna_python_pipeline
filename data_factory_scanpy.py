@@ -270,7 +270,11 @@ del(scrna_hvgs)
 
 
 print("Saving the preprocessed data.")
+scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
+del scrna.obs["scrublet_predicted_doublet"]
 scrna = sc.read_h5ad(output+"/scrna_preprocessed_data.h5ad")
+scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+del scrna.obs["scrublet_predicted_doublet_str"]
 
 
 print("Data Clustering.")
@@ -290,8 +294,8 @@ for res in np.arange(0.1, 0.9, 0.1):
     writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
     for cluster in sorted(scrna.obs[key_added].unique()):
         print("Cluster: "+str(cluster))
-        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "degs_genes_temp")
-        result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = "degs_genes_temp")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_temp")
+        result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = "deg_genes_temp")
         result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
         top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
         top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
@@ -335,4 +339,7 @@ for stage in stages:
 
 writer.close()
 
+
+scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
+del scrna.obs["scrublet_predicted_doublet"]
 scrna.write_h5ad(os.path.join(output, "scrna_final_data.h5ad"))
