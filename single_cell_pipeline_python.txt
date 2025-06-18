@@ -1,0 +1,17 @@
+We install packages for the analysis of single cell RNA seq data.
+
+1) Unload the typically loaded modules.
+module unload scRNA
+module unload R
+
+2) Activate conda.
+conda activate
+
+3) Create the environment single_cell_pipeline_python.
+unset PYTHONPATH
+conda create -n single_cell_pipeline_python python=3.10 -y
+conda activate single_cell_pipeline_python
+conda install -c conda-forge \
+  numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
+  harmonypy python-igraph leidenalg statsmodels cython setuptools wheel -y
+python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter
