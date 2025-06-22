@@ -320,8 +320,8 @@ for res in np.arange(0.1, 0.9, 0.1):
     writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
     for cluster in sorted(scrna.obs[key_added].unique()):
         print("Cluster: "+str(cluster))
-        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_temp")
-        result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = "deg_genes_temp")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}_cluster_{cluster}")
+        result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}_cluster_{cluster}")
         result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
         top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
         top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
