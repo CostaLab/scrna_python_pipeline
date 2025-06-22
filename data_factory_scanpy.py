@@ -124,9 +124,9 @@ for var in qc_vars:
     plt.xticks(rotation = 45, ha = "right")
     plt.tight_layout()
     pdf_path = os.path.join(qc_dir, f"{var}_violin_raw.pdf")
-    plt.savefig(pdf_path)
+    plt.savefig(pdf_path, bbox_inches = "tight")
     png_path = os.path.join(qc_dir, f"{var}_violin_raw.png")
-    plt.savefig(png_path, dpi = 300)
+    plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
     plt.close()
 
 
@@ -169,8 +169,8 @@ plt.xlabel("Sample")
 plt.title("Suspected Doublets per Sample")
 plt.xticks(rotation = 45, ha = "right")
 plt.tight_layout()
-plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.pdf"))
-plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.png"), dpi = 300)
+plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.pdf"), bbox_inches = "tight")
+plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.png"), bbox_inches = "tight", dpi = 300)
 plt.close()
 
 
@@ -191,9 +191,9 @@ for var in qc_vars:
     plt.xticks(rotation = 45, ha = "right")
     plt.tight_layout()
     pdf_path = os.path.join(qc_dir, f"{var}_violin_filtered.pdf")
-    plt.savefig(pdf_path)
+    plt.savefig(pdf_path, bbox_inches = "tight")
     png_path = os.path.join(qc_dir, f"{var}_violin_filtered.png")
-    plt.savefig(png_path, dpi = 300)
+    plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
     plt.close()
 
 
@@ -277,17 +277,43 @@ scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_
 del scrna.obs["scrublet_predicted_doublet_str"]
 
 
-print("Data Clustering.")
+print("Generating additional plots.")
 clustering_dir = os.path.join(output, "clustering_plots")
 os.makedirs(clustering_dir, exist_ok = True)
+print("Plot: samples")
+fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "batch", 
+                      show = False, return_fig = True, legend_fontsize = 8)
+fig.savefig(os.path.join(clustering_dir, "umap_sample.pdf"), bbox_inches = "tight")
+fig.savefig(os.path.join(clustering_dir, "umap_sample.png"), bbox_inches = "tight", dpi = 300)
+plt.close(fig)
+
+
+print("Plot: stage")
+fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "stage", 
+                      show = False, return_fig = True, legend_fontsize = 8)
+fig.savefig(os.path.join(clustering_dir, "umap_stage.pdf"), bbox_inches = "tight")
+fig.savefig(os.path.join(clustering_dir, "umap_stage.png"), bbox_inches = "tight", dpi = 300)
+plt.close(fig)
+
+
+print("Plot: cell cycle")
+fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "phase", 
+                      show = False, return_fig = True, legend_fontsize = 8)
+fig.savefig(os.path.join(clustering_dir, "umap_phase.pdf"), bbox_inches = "tight")
+fig.savefig(os.path.join(clustering_dir, "umap_phase.png"), bbox_inches = "tight", dpi = 300)
+plt.close(fig)
+
+
+print("Data Clustering.")
 for res in np.arange(0.1, 0.9, 0.1):
     key_added = f"leiden_{res:.1f}"
     print(key_added)
     sc.tl.leiden(scrna, resolution = res, key_added = key_added)
     # fig = sc.pl.umap(scrna, color = key_added, basis = "X_umap_harmony", show = False, return_fig = True)
-    fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = key_added, show = False, return_fig = True)
-    fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.pdf"))
-    fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), dpi = 300)
+    fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = key_added, 
+                          show = False, return_fig = True, legend_fontsize = 8)
+    fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.pdf"), bbox_inches = "tight")
+    fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), bbox_inches = "tight", dpi = 300)
     plt.close(fig)
     deg_dir = os.path.join(output, f"degs_{key_added}")
     os.makedirs(deg_dir, exist_ok = True)
@@ -306,8 +332,8 @@ for res in np.arange(0.1, 0.9, 0.1):
         plt.axvline(0, color = "gray", linestyle = "--")
         plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
         plt.tight_layout()
-        plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"))
-        plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), dpi = 300)
+        plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"), bbox_inches = "tight")
+        plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi = 300)
         plt.close()
     writer.close()
 
@@ -332,14 +358,16 @@ for stage in stages:
     plt.axvline(0, color = "gray", linestyle = "--")
     plt.title(f"Top DEGs for Stage {stage}")
     plt.tight_layout()
-    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"))
-    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), dpi = 300)
+    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"), bbox_inches = "tight")
+    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = 300)
     plt.close()
 
 
 writer.close()
 
 
+print("Save the final object.")
 scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
 del scrna.obs["scrublet_predicted_doublet"]
-scrna.write_h5ad(os.path.join(output, "scrna_final_data.h5ad"))
+scrna.write_h5ad(filename = output+"scrna_final_data.h5ad")
+

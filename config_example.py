@@ -33,6 +33,7 @@ LOGREG_MAXITER = 100
 # Number of workers
 WORKER_NUM = 1
 
+### -------------- Data SRC-----------------------------
 data_src = {
     "A_MxCre" : "data/A_MxCre/",
     "B_MxCre" : "data/B_MxCre/",
