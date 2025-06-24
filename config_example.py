@@ -22,6 +22,22 @@ PCT_RIBO_FLOOR   = 0
 # Do you want to remove doublets (True) or do you just want to determine them (False)?
 doublet_switch   = False
 
+# How many PCs do you want to use to determine the the variance contribution?
+N_PCS_VARIANCE_CONTRIBUTION = 50
+# How many neighbors do you want to use for PCA UMAP?
+N_NEIGHBORS_PCA = 10
+# How many PCs do you want to use for the PCA UMAP?
+N_PCS_PCA = 40
+
+# How many highly variable genes do you want to use for the Harmony integration?
+N_TOP_GENES_INTEGRATION = 2000
+# How many iterations should harmony try before terminating? Default is 10.
+MAX_ITER_HARMONY = 10
+# How many neighbors do you want to use for the UMAP?
+N_NEIGHBORS_UMAP_HARMONY = 10
+# How many PCs do you want to use to determine the neighbors for the UAMP?
+N_PCS_UMAP_HARMONY = 40
+
 # How verbose should the script be?
 SETTING_VERBOSITY = 3 # verbosity: errors (0), warnings (1), info (2), hints (3)
 

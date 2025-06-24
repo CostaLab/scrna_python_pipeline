@@ -44,12 +44,12 @@ if not os.path.isfile(config_path):
     raise FileNotFoundError(f"Config file not found: {config_path}")
 
 
-print("Loading the config file.")
+print("Loading the config file.", flush = True)
 exec(open(config_path).read())
 sc.settings.verbosity = SETTING_VERBOSITY
 
 
-print("Generating the output folder if needed.")
+print("Generating the output folder if needed.", flush = True)
 os.makedirs(output, exist_ok = True)
 
 
@@ -58,6 +58,13 @@ check_numeric(MINCELLS, "MINCELLS")
 check_numeric(MINGENES, "MINGENES")
 check_numeric(MINREADS, "MINREADS")
 check_numeric(LOGREG_MAXITER, "LOGREG_MAXITER")
+check_numeric(N_PCS_VARIANCE_CONTRIBUTION, "N_PCS_VARIANCE_CONTRIBUTION")
+check_numeric(N_NEIGHBORS_PCA, "N_NEIGHBORS_PCA")
+check_numeric(N_PCS_PCA, "N_PCS_PCA")
+check_numeric(N_TOP_GENES_INTEGRATION, "N_TOP_GENES_INTEGRATION")
+check_numeric(MAX_ITER_HARMONY, "MAX_ITER_HARMONY")
+check_numeric(N_NEIGHBORS_UMAP_HARMONY, "N_NEIGHBORS_UMAP_HARMONY")
+check_numeric(N_PCS_UMAP_HARMONY, "N_PCS_UMAP_HARMONY")
 
 MAXGENES         = check_numeric_or_inf(MAXGENES, "MAXGENES")
 MAXREADS         = check_numeric_or_inf(MAXREADS, "MAXREADS")
@@ -67,21 +74,23 @@ PCT_RIBO_CEILING = check_numeric_or_inf(PCT_RIBO_CEILING, "PCT_RIBO_CEILING")
 PCT_RIBO_FLOOR   = check_numeric_or_inf(PCT_RIBO_FLOOR, "PCT_RIBO_FLOOR")
 
 
-print("We get the list of sample names.")
+print("We get the list of sample names.", flush = True)
 sample_names = list(stage_lst.keys())
 
 
-print("Loading the data.")
+print("Loading the data.", flush = True)
 scrna = sc.read_10x_mtx(data_src[sample_names[0]], cache = True)
 if(len(sample_names) > 1):
     scrna = [scrna]
     for x in sample_names[1:]:
-        print(x)
+        print(x, flush = True)
         scrna.append(sc.read_10x_mtx(data_src[x], cache = True))
+    scrna_dict = {name: adata for name, adata in zip(sample_names, scrna)}
+    scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
+else:
+    scrna.obs["batch"] = sample_names[0]
 
 
-scrna_dict = {name: adata for name, adata in zip(sample_names, scrna)}
-scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
 # Changing the names to have the form [SAMPLE]_[CELL_ID]-1.
 # This is done, because of tradition.
 scrna.obs_names = [
@@ -95,7 +104,7 @@ scrna.write_h5ad(filename = output+"/scrna_raw_data.h5ad")
 scrna = sc.read_h5ad(output+"/scrna_raw_data.h5ad")#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
 
 
-print("Looking into the total counts per condition and the number of genes per counts.")
+print("Looking into the total counts per condition and the number of genes per counts.", flush = True)
 scrna.var["mito"] = scrna.var_names.str.upper().str.startswith("MT-")
 scrna.var["ribo"] = scrna.var_names.str.upper().str.match(r"^RP[SL]")
 sc.pp.calculate_qc_metrics(scrna, qc_vars = ["mito", "ribo"], percent_top = None, log1p = False, inplace = True)
@@ -112,7 +121,7 @@ y_labels = {
 }
 
 
-print("Generating QC figures before quality control.")
+print("Generating QC figures before quality control.", flush = True)
 n_samples = len(scrna.obs["batch"].unique())
 fig_width = max(6, n_samples)
 for var in qc_vars:
@@ -130,7 +139,7 @@ for var in qc_vars:
     plt.close()
 
 
-print("Filtering genes and cells.")
+print("Filtering genes and cells.", flush = True)
 sc.pp.filter_cells(scrna, min_genes = MINGENES)
 sc.pp.filter_cells(scrna, max_genes = MAXGENES)
 sc.pp.filter_genes(scrna, min_cells = MINCELLS)
@@ -142,7 +151,7 @@ scrna = scrna[scrna.obs.pct_counts_ribo < PCT_RIBO_CEILING, :]
 scrna = scrna[scrna.obs.pct_counts_ribo > PCT_RIBO_FLOOR, :]
 
 
-print("Detecting doublets.")
+print("Detecting doublets.", flush = True)
 scrna.layers["counts"] = scrna.X.copy()
 doublet_scores = []
 predicted_doublets = []
@@ -155,7 +164,7 @@ for batch in scrna.obs["batch"].unique():
     scrna.obs.loc[adata_batch.obs_names, "scrublet_predicted_doublet"] = preds
 
 
-print("Plotting the number of doublets per sample.")
+print("Plotting the number of doublets per sample.", flush = True)
 doublet_counts = (
     scrna.obs
     .groupby("batch")["scrublet_predicted_doublet"]
@@ -174,13 +183,13 @@ plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.png"), bbox_inches = 
 plt.close()
 
 
-print("Removing doublets if so desired.")
+print("Removing doublets if so desired.", flush = True)
 if doublet_switch:
-    print("Removing doublets.")
+    print("Removing doublets.", flush = True)
     scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
 
 
-print("Generating QC figures after quality control.")
+print("Generating QC figures after quality control.", flush = True)
 qc_vars = ["total_counts", "n_genes_by_counts", "pct_counts_mito", "pct_counts_ribo", "scrublet_score"]
 for var in qc_vars:
     plt.figure(figsize = (fig_width, 5))
@@ -197,13 +206,13 @@ for var in qc_vars:
     plt.close()
 
 
-print("Log normalizing the data.")
+print("Log normalizing the data.", flush = True)
 sc.pp.normalize_total(scrna, target_sum = 1e4)
 sc.pp.log1p(scrna)
 scrna.layers["lognorm"] = scrna.X.copy()
 
 
-print("Cell Cycle Scoring.")
+print("Cell Cycle Scoring.", flush = True)
 # To reduce the number of files required to run the analysis, the cell cycle genes are saved here.
 # They are from Regev Lab (regev_lab_cell_cycle_genes.txt)
 # Right now, they are only for humans. An implementation for mouse is necessary.
@@ -222,40 +231,46 @@ g2m_genes = [x for x in g2m_genes if x in scrna.var_names]
 sc.tl.score_genes_cell_cycle(scrna, s_genes = s_genes, g2m_genes = g2m_genes)
 
 
-print("Determining highly variable genes.")
+print("Determining highly variable genes.", flush = True)
 # We only scale on the highly variable genes to reduce the amount of memory needed.
-sc.pp.highly_variable_genes(scrna, n_top_genes = 2000, flavor = "seurat_v3", subset = False, layer = "counts")
+sc.pp.highly_variable_genes(scrna, n_top_genes = N_TOP_GENES_INTEGRATION, flavor = "seurat_v3", subset = False, layer = "counts")
 # Generating a second object to reduce the memory needed in the integration.
 scrna_hvgs = scrna[:, scrna.var["highly_variable"]].copy()
 
 
-print("Regressing out confounders.")
+print("Regressing out confounders.", flush = True)
 sc.pp.regress_out(scrna_hvgs, keys = ["total_counts", "pct_counts_mito", "S_score", "G2M_score"], n_jobs = WORKER_NUM)
 sc.pp.scale(scrna_hvgs)
 
 
-print("Dimension Reduction.")
+print("Dimension Reduction.", flush = True)
 sc.tl.pca(scrna_hvgs, svd_solver = "arpack")
 
 
-print("Looking into the PC variance contribution.")
-sc.pl.pca_variance_ratio(scrna_hvgs, log = True, n_pcs = 50)
+print("Looking into the PC variance contribution.", flush = True)
+plt.figure(figsize = (5, 5))
+sc.pl.pca_variance_ratio(scrna_hvgs, log = True, n_pcs = N_PCS_VARIANCE_CONTRIBUTION, show = False)
+plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.png"), dpi = 300, bbox_inches = "tight")
+plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.pdf"), bbox_inches = "tight")
+plt.close()
 
 
-print("PCA.")
-sc.pp.neighbors(scrna_hvgs, n_neighbors = 10, n_pcs = 40, use_rep = "X_pca")
+print("PCA.", flush = True)
+sc.pp.neighbors(scrna_hvgs, n_neighbors = N_NEIGHBORS_PCA, n_pcs = N_PCS_PCA, use_rep = "X_pca")
 sc.tl.umap(scrna_hvgs)
 scrna_hvgs.obsm["X_pca_umap"] = scrna_hvgs.obsm["X_umap"] 
 
 
-print("Sample Integration.")
-sce.pp.harmony_integrate(scrna_hvgs, key = "batch")
-sc.pp.neighbors(scrna_hvgs, n_neighbors = 10, n_pcs = 40, use_rep = "X_pca_harmony")
+print("Sample Integration.", flush = True)
+# In case of only one sample (batch), harmony_integrate simply returns the original PCA.
+# This does not cause a crash. To keep everything simple, we will ignore this fact.
+sce.pp.harmony_integrate(scrna_hvgs, key = "batch", max_iter_harmony = MAX_ITER_HARMONY)
+sc.pp.neighbors(scrna_hvgs, n_neighbors = N_NEIGHBORS_UMAP_HARMONY, n_pcs = N_PCS_UMAP_HARMONY, use_rep = "X_pca_harmony")
 sc.tl.umap(scrna_hvgs)
 scrna_hvgs.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap"] 
 
 
-print("Adding the integration information to the full object.")
+print("Adding the integration information to the full object.", flush = True)
 scrna.obsm["X_pca"]          = scrna_hvgs.obsm["X_pca"]
 scrna.obsm["X_umap"]         = scrna_hvgs.obsm["X_pca_umap"]
 scrna.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap_harmony"]
@@ -269,7 +284,7 @@ scrna.uns["PCs"]             = scrna_hvgs.varm["PCs"]
 del(scrna_hvgs)
 
 
-print("Saving the preprocessed data.")
+print("Saving the preprocessed data.", flush = True)
 scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
 del scrna.obs["scrublet_predicted_doublet"]
 scrna.write_h5ad(filename = output+"scrna_preprocessed_data.h5ad")
@@ -277,10 +292,10 @@ scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_
 del scrna.obs["scrublet_predicted_doublet_str"]
 
 
-print("Generating additional plots.")
+print("Generating additional plots.", flush = True)
 clustering_dir = os.path.join(output, "clustering_plots")
 os.makedirs(clustering_dir, exist_ok = True)
-print("Plot: samples")
+print("Plot: samples", flush = True)
 fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "batch", 
                       show = False, return_fig = True, legend_fontsize = 8)
 fig.savefig(os.path.join(clustering_dir, "umap_sample.pdf"), bbox_inches = "tight")
@@ -288,7 +303,7 @@ fig.savefig(os.path.join(clustering_dir, "umap_sample.png"), bbox_inches = "tigh
 plt.close(fig)
 
 
-print("Plot: stage")
+print("Plot: stage", flush = True)
 fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "stage", 
                       show = False, return_fig = True, legend_fontsize = 8)
 fig.savefig(os.path.join(clustering_dir, "umap_stage.pdf"), bbox_inches = "tight")
@@ -296,7 +311,7 @@ fig.savefig(os.path.join(clustering_dir, "umap_stage.png"), bbox_inches = "tight
 plt.close(fig)
 
 
-print("Plot: cell cycle")
+print("Plot: cell cycle", flush = True)
 fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "phase", 
                       show = False, return_fig = True, legend_fontsize = 8)
 fig.savefig(os.path.join(clustering_dir, "umap_phase.pdf"), bbox_inches = "tight")
@@ -304,7 +319,7 @@ fig.savefig(os.path.join(clustering_dir, "umap_phase.png"), bbox_inches = "tight
 plt.close(fig)
 
 
-print("Data Clustering.")
+print("Data Clustering.", flush = True)
 for res in np.arange(0.1, 0.9, 0.1):
     key_added = f"leiden_{res:.1f}"
     print(key_added)
@@ -315,11 +330,25 @@ for res in np.arange(0.1, 0.9, 0.1):
     fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.pdf"), bbox_inches = "tight")
     fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), bbox_inches = "tight", dpi = 300)
     plt.close(fig)
+
+
+print("Save the clustered object.", flush = True)
+scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
+del scrna.obs["scrublet_predicted_doublet"]
+scrna.write_h5ad(filename = output+"scrna_clustered.h5ad")
+scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+del scrna.obs["scrublet_predicted_doublet_str"]
+
+
+print("Comparing clusters for marker genes.", flush = True)
+for res in np.arange(0.1, 0.9, 0.1):
+    key_added = f"leiden_{res:.1f}"
+    print(key_added, flush = True)
     deg_dir = os.path.join(output, f"degs_{key_added}")
     os.makedirs(deg_dir, exist_ok = True)
     writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
     for cluster in sorted(scrna.obs[key_added].unique()):
-        print("Cluster: "+str(cluster))
+        print("Cluster: "+str(cluster), flush = True)
         sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}_cluster_{cluster}")
         result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}_cluster_{cluster}")
         result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
@@ -338,35 +367,32 @@ for res in np.arange(0.1, 0.9, 0.1):
     writer.close()
 
 
-print("We compare the stages.")
-stage_dir = os.path.join(output, "degs_stage")
-os.makedirs(stage_dir, exist_ok = True)
-sc.tl.rank_genes_groups(scrna, groupby = "stage", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_stage")
+if(scrna.obs["stage"].nunique() > 1):
+    print("We compare the stages.", flush = True)
+    stage_dir = os.path.join(output, "degs_stage")
+    os.makedirs(stage_dir, exist_ok = True)
+    sc.tl.rank_genes_groups(scrna, groupby = "stage", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_stage")
+    stages = scrna.obs["stage"].unique().tolist()
+    writer = pd.ExcelWriter(os.path.join(stage_dir, "stage_degs.xlsx"), engine = "xlsxwriter")
+    for stage in stages:
+        result = sc.get.rank_genes_groups_df(scrna, group = stage, key = "deg_genes_stage")
+        result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
+        top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
+        top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
+        top_genes = pd.concat([top_down[::-1], top_up])
+        plt.figure(figsize = (6, 6))
+        bar_colors = ["red"] * len(top_down) + ["blue"] * len(top_up)
+        sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
+        plt.axvline(0, color = "gray", linestyle = "--")
+        plt.title(f"Top DEGs for Stage {stage}")
+        plt.tight_layout()
+        plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"), bbox_inches = "tight")
+        plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = 300)
+        plt.close()
+    writer.close()
 
 
-stages = scrna.obs["stage"].unique().tolist()
-writer = pd.ExcelWriter(os.path.join(stage_dir, "stage_degs.xlsx"), engine = "xlsxwriter")
-for stage in stages:
-    result = sc.get.rank_genes_groups_df(scrna, group = stage, key = "deg_genes_stage")
-    result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
-    top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
-    top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
-    top_genes = pd.concat([top_down[::-1], top_up])
-    plt.figure(figsize = (6, 6))
-    bar_colors = ["red"] * len(top_down) + ["blue"] * len(top_up)
-    sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
-    plt.axvline(0, color = "gray", linestyle = "--")
-    plt.title(f"Top DEGs for Stage {stage}")
-    plt.tight_layout()
-    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"), bbox_inches = "tight")
-    plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = 300)
-    plt.close()
-
-
-writer.close()
-
-
-print("Save the final object.")
+print("Save the final object.", flush = True)
 scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
 del scrna.obs["scrublet_predicted_doublet"]
 scrna.write_h5ad(filename = output+"scrna_final_data.h5ad")
