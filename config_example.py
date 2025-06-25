@@ -1,3 +1,15 @@
+# Phases: the different parts of the pipeline
+# Which parts of the pipeline do you want to execute? True or False
+# The comparison phase takes the longest time.
+phases = {
+    "raw"         : True, # Load the data.
+    "filter"      : True, # Perform QC
+    "integration" : True, # Integrate the data using harmony
+    "cluster"     : True, # Perform the clustering using Leiden
+    "comparison"  : True  # Determine marker genes for each cluster and compare the stages.
+}
+
+# Where is your output supposed to go?
 output = "/path/to/your/output/folder/"
 
 # QC parameters
