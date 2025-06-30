@@ -13,6 +13,9 @@ import skmisc
 import matplotlib.pyplot as plt
 import sys
 import os
+# import multiprocessing as mp
+from collections import defaultdict
+import glob
 sc.logging.print_header()
 sc.settings.set_figure_params(dpi = 300, facecolor = "white")
 
@@ -21,6 +24,13 @@ sc.settings.set_figure_params(dpi = 300, facecolor = "white")
 def check_numeric(value, var_name = "value"):
     if not isinstance(value, (int, float)):
         sys.exit(f"Error: {var_name} must be a number. Got {type(value).__name__} instead.")
+
+
+def check_strings(value, allowed_values, var_name = "value"):
+    if not isinstance(value, str):
+        sys.exit(f"Error: {var_name} must be a string. Got {type(value).__name__} instead.")
+    if not value in allowed_values:
+        sys.exit(f"Error: {var_name} must be one of {allowed_values}.")
 
 
 def check_boolean(value, var_name = "value"):
@@ -35,6 +45,44 @@ def check_numeric_or_inf(value, var_name = "value"):
         return value
     else:
         sys.exit(f"Error: {var_name} must be a number or 'Inf' (string). Got {type(value).__name__} instead.")
+
+
+def process_cluster_task(args):
+    res, cluster, key_added, output, deg_method, max_iter = args
+    deg_dir = os.path.join(output, f"degs_{key_added}")
+    os.makedirs(deg_dir, exist_ok = True)
+    
+    print(f"Running: {key_added}, Cluster {cluster}", flush = True)
+    
+    adata_cluster = scrna.copy()
+    
+    # Run DEG
+    sc.tl.rank_genes_groups(adata_cluster, groupby = key_added, groups = [cluster],
+                            reference = "rest", method = deg_method,
+                            max_iter = max_iter,
+                            key_added = f"degs_{key_added}_cluster_{cluster}")
+    result = sc.get.rank_genes_groups_df(adata_cluster, group = cluster,
+                                         key = f"degs_{key_added}_cluster_{cluster}")
+    
+    # Save CSV
+    csv_path = os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.csv")
+    result.to_csv(csv_path, index=False)
+    
+    # Plot top genes
+    top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
+    top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
+    top_genes = pd.concat([top_down[::-1], top_up])
+    plt.figure(figsize=(6, 6))
+    bar_colors = ["red"] * len(top_down) + ["blue"] * len(top_up)
+    sns.barplot(x = "logfoldchanges", y="names", data = top_genes, palette = bar_colors)
+    plt.axvline(0, color = "gray", linestyle = "--")
+    plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
+    plt.tight_layout()
+    plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"), bbox_inches = "tight")
+    plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi=300)
+    plt.close()
+    
+    return key_added, cluster, csv_path
 
 
 if len(sys.argv) != 2:
@@ -88,13 +136,37 @@ if(len(phases) == 0):
 
 
 for key, val in phases.items():
-    check_boolean(val, key)
+    check_strings(val, allowed_values = ("execute", "load", "skip"), var_name = key)
+
+
+# We check if a phase has a required phase.
+required_phases_for_phases = {
+    "filter": ["integration"],
+    "integration": ["cluster"],
+    "cluster": ["comparison"]
+}
+
+for phase, dependents in required_phases_for_phases.items():
+    if phases.get(phase) == "skip":
+        for dependent_use in dependents:
+            if phases.get(dependent_use) == "execute":
+                raise ValueError(f"Cannot execute '{dependent_use}' phase without loading or executing '{phase}' phase.")
+
 
 print("We get the list of sample names.", flush = True)
 sample_names = list(stage_lst.keys())
 
 
-if phases.get("raw"):
+
+
+if phases.get("raw") == "skip":
+    print("Skipping data loading.", flush = True)
+elif phases.get("raw") == "load":
+    print("Loading the raw data.", flush = True)
+    if not os.path.isfile(os.path.join(output, "scrna_raw_data.h5ad")):
+        raise FileNotFoundError(f"scrna_raw_data not found: {output}scrna_raw_data.h5ad.")
+    scrna = sc.read_h5ad(os.path.join(output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
+elif phases.get("raw") == "execute":
     print("Loading the data.", flush = True)
     scrna = sc.read_10x_mtx(data_src[sample_names[0]], cache = True)
     if(len(sample_names) > 1):
@@ -122,13 +194,18 @@ if phases.get("raw"):
 
 
 
-if phases.get("filter"):
+
+if phases.get("filter") == "skip":
+    print("Skipping data filtering.", flush = True)
+elif phases.get("filter") == "load":
+    print("Loading the filtered data.", flush = True)
+    if not os.path.isfile(os.path.join(output, "scrna_filtered_data.h5ad")):
+        raise FileNotFoundError(f"scrna_filtered_data not found: {output}scrna_filtered_data.h5ad.")
+    scrna = sc.read_h5ad(os.path.join(output, "scrna_filtered_data.h5ad"))
+    scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+    del scrna.obs["scrublet_predicted_doublet_str"]
+elif phases.get("filter") == "execute":
     print("Looking into the total counts per condition and the number of genes per counts.", flush = True)
-    if not phases.get("raw"):
-        if not os.path.isfile(os.path.join(output, "scrna_raw_data.h5ad")):
-            raise FileNotFoundError(f"scrna_raw_data not found: {output}scrna_raw_data.h5ad.")
-        scrna = sc.read_h5ad(os.path.join(output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
-    
     scrna.var["mito"] = scrna.var_names.str.upper().str.startswith("MT-")
     scrna.var["ribo"] = scrna.var_names.str.upper().str.match(r"^RP[SL]")
     sc.pp.calculate_qc_metrics(scrna, qc_vars = ["mito", "ribo"], percent_top = None, log1p = False, inplace = True)
@@ -260,14 +337,18 @@ if phases.get("filter"):
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
-if phases.get("integration"):
-    if not phases.get("filter"):
-        if not os.path.isfile(os.path.join(output, "scrna_filtered_data.h5ad")):
-            raise FileNotFoundError(f"scrna_filtered_data not found: {output}scrna_filtered_data.h5ad.")
-        scrna = sc.read_h5ad(os.path.join(output, "scrna_filtered_data.h5ad"))
-        scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
-        del scrna.obs["scrublet_predicted_doublet_str"]
-    
+
+
+if phases.get("integration") == "skip":
+    print("Skipping data integration.", flush = True)
+elif phases.get("integration") == "load":
+    print("Loading the integrated data.", flush = True)
+    if not os.path.isfile(os.path.join(output, "scrna_integrated_data.h5ad")):
+        raise FileNotFoundError(f"scrna_integrated_data not found: {output}scrna_integrated_data.h5ad.")
+    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_integrated_data.h5ad"))
+    scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+    del scrna.obs["scrublet_predicted_doublet_str"]
+elif phases.get("integration") == "execute":
     print("Determining highly variable genes.", flush = True)
     # We only scale on the highly variable genes to reduce the amount of memory needed.
     sc.pp.highly_variable_genes(scrna, n_top_genes = N_TOP_GENES_INTEGRATION, flavor = "seurat_v3", subset = False, layer = "counts")
@@ -355,13 +436,18 @@ if phases.get("integration"):
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
-if phases.get("cluster"):
-    if not phases.get("integration"):
-        if not os.path.isfile(os.path.join(output, "scrna_integrated_data.h5ad")):
-            raise FileNotFoundError(f"scrna_integrated_data not found: {output}scrna_integrated_data.h5ad.")
-        scrna = sc.read_h5ad(os.path.join(output, "scrna_integrated_data.h5ad"))
-        scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
-        del scrna.obs["scrublet_predicted_doublet_str"]
+
+
+if phases.get("cluster") == "skip":
+    print("Skipping data clustering.", flush = True)
+elif phases.get("cluster") == "load":
+    print("Loading the clustered data.", flush = True)
+    if not os.path.isfile(os.path.join(output, "scrna_clustered_data.h5ad")):
+        raise FileNotFoundError(f"scrna_clustered_data not found: {output}scrna_clustered_data.h5ad.")
+    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_clustered_data.h5ad"))
+    scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+    del scrna.obs["scrublet_predicted_doublet_str"]
+elif phases.get("cluster") == "execute":
     print("Data Clustering.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
         key_added = f"leiden_{res:.1f}"
@@ -383,32 +469,35 @@ if phases.get("cluster"):
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
-if phases.get("comparison"):
-    if not phases.get("cluster"):
-        if not os.path.isfile(os.path.join(output, "scrna_clustered_data.h5ad")):
-            raise FileNotFoundError(f"scrna_clustered_data not found: {output}scrna_clustered_data.h5ad.")
-        scrna = sc.read_h5ad(os.path.join(output, "scrna_clustered_data.h5ad"))
-        scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
-        del scrna.obs["scrublet_predicted_doublet_str"]
-    
-    
+
+
+if phases.get("comparison") == "skip":
+    print("Skipping data comparison.")
+elif phases.get("comparison") == "load":
+    print("Loading the data with comparison results.")
+    if not os.path.isfile(os.path.join(output, "scrna_comparison_data.h5ad")):
+        raise FileNotFoundError(f"scrna_comparison_data not found: {output}scrna_comparison_data.h5ad.")
+    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_comparison_data.h5ad"))
+    scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
+    del scrna.obs["scrublet_predicted_doublet_str"]
+elif phases.get("comparison") == "execute":
     print("Comparing clusters for marker genes.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
         key_added = f"leiden_{res:.1f}"
-        print(key_added, flush = True)
+        print(key_added)
         deg_dir = os.path.join(output, f"degs_{key_added}")
         os.makedirs(deg_dir, exist_ok = True)
         writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}")
         for cluster in sorted(scrna.obs[key_added].unique()):
-            print("Cluster: " + str(cluster), flush = True)
-            sc.tl.rank_genes_groups(scrna, groupby = key_added, groups = [cluster], reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}_cluster_{cluster}")
-            result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}_cluster_{cluster}")
+            print("Cluster: "+str(cluster))
+            result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}")
             result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
             top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
             top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
-            top_genes = pd.concat([top_down[::-1], top_up])
+            top_genes = pd.concat([top_up, top_down[::-1]])
             plt.figure(figsize = (6, 6))
-            bar_colors = ["red"] * len(top_down) + ["blue"] * len(top_up)
+            bar_colors = ["red"] * len(top_up) + ["blue"] * len(top_down)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
             plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
@@ -419,6 +508,7 @@ if phases.get("comparison"):
         writer.close()
     
     
+    print("Comparing stages.", flush = True)
     if(scrna.obs["stage"].nunique() > 1):
         print("We compare the stages.", flush = True)
         stage_dir = os.path.join(output, "degs_stage")
@@ -431,9 +521,9 @@ if phases.get("comparison"):
             result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
             top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
             top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
-            top_genes = pd.concat([top_down[::-1], top_up])
+            top_genes = pd.concat([top_up, top_down[::-1]])
             plt.figure(figsize = (6, 6))
-            bar_colors = ["red"] * len(top_down) + ["blue"] * len(top_up)
+            bar_colors = ["red"] * len(top_up) + ["blue"] * len(top_down)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
             plt.title(f"Top DEGs for Stage {stage}")
@@ -442,7 +532,6 @@ if phases.get("comparison"):
             plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = 300)
             plt.close()
         writer.close()
-    
     
     print("Save the comparison object.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)

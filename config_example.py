@@ -1,12 +1,12 @@
 # Phases: the different parts of the pipeline
-# Which parts of the pipeline do you want to execute? True or False
+# Which parts of the pipeline do you want to execute? load, execute or skip
 # The comparison phase takes the longest time.
 phases = {
-    "raw"         : True, # Load the data.
-    "filter"      : True, # Perform QC
-    "integration" : True, # Integrate the data using harmony
-    "cluster"     : True, # Perform the clustering using Leiden
-    "comparison"  : True  # Determine marker genes for each cluster and compare the stages.
+    "raw"         : "execute", # Load the data.
+    "filter"      : "execute", # Perform QC
+    "integration" : "execute", # Integrate the data using harmony
+    "cluster"     : "execute", # Perform the clustering using Leiden
+    "comparison"  : "execute"  # Determine marker genes for each cluster and compare the stages.
 }
 
 # Where is your output supposed to go?
