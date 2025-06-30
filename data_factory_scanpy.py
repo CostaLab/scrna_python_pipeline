@@ -240,9 +240,7 @@ elif phases.get("filter") == "execute":
     
     print("Filtering genes and cells.", flush = True)
     sc.pp.filter_cells(scrna, min_genes = MINGENES)
-    sc.pp.filter_cells(scrna, max_genes = MAXGENES)
     sc.pp.filter_genes(scrna, min_cells = MINCELLS)
-    scrna = scrna[scrna.obs.total_counts < MAXREADS, :]
     scrna = scrna[scrna.obs.total_counts > MINREADS, :]
     scrna = scrna[scrna.obs.pct_counts_mito < PCT_MITO_CEILING, :]
     scrna = scrna[scrna.obs.pct_counts_mito > PCT_MITO_FLOOR, :]
@@ -261,6 +259,21 @@ elif phases.get("filter") == "execute":
         scores, preds = scrub.scrub_doublets()
         scrna.obs.loc[adata_batch.obs_names, "scrublet_score"] = scores
         scrna.obs.loc[adata_batch.obs_names, "scrublet_predicted_doublet"] = preds
+        scrub.set_embedding("UMAP", scr.get_umap(scrub.manifold_obs_, n_neighbors = 15, min_dist = 0.3))
+        x = scrub._embeddings["UMAP"][:,0]
+        y = scrub._embeddings["UMAP"][:,1]
+        predicted_doublets_index = np.argsort(preds)
+        plt.figure(figsize=(7, 6))
+        plt.scatter(x, y, c = preds[predicted_doublets_index], cmap = scr.custom_cmap([[.7,.7,.7], [1,0,0]]), s = 2)
+        plt.xlabel("UMAP 1")
+        plt.ylabel("UMAP 2")
+        plt.title(batch)
+        plt.tight_layout()
+        pdf_path = os.path.join(qc_dir, f"{batch}_doublet_UMAP.pdf")
+        plt.savefig(pdf_path, bbox_inches = "tight")
+        png_path = os.path.join(qc_dir, f"{batch}_doublet_UMAP.png")
+        plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
+        plt.close()
     
     
     print("Plotting the number of doublets per sample.", flush = True)
@@ -286,6 +299,11 @@ elif phases.get("filter") == "execute":
     if doublet_switch:
         print("Removing doublets.", flush = True)
         scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
+    
+    
+    print("Filtering genes and cells after doublet removal.", flush = True)
+    sc.pp.filter_cells(scrna, max_genes = MAXGENES)
+    scrna = scrna[scrna.obs.total_counts < MAXREADS, :]
     
     
     print("Generating QC figures after quality control.", flush = True)
