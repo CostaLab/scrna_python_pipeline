@@ -122,6 +122,7 @@ check_numeric(N_TOP_GENES_INTEGRATION, "N_TOP_GENES_INTEGRATION")
 check_numeric(MAX_ITER_HARMONY, "MAX_ITER_HARMONY")
 check_numeric(N_NEIGHBORS_UMAP_HARMONY, "N_NEIGHBORS_UMAP_HARMONY")
 check_numeric(N_PCS_UMAP_HARMONY, "N_PCS_UMAP_HARMONY")
+check_numeric(P_VALUE_CUTOFF, "P_VALUE_CUTOFF")
 
 MAXGENES         = check_numeric_or_inf(MAXGENES, "MAXGENES")
 MAXREADS         = check_numeric_or_inf(MAXREADS, "MAXREADS")
@@ -508,14 +509,27 @@ elif phases.get("comparison") == "execute":
         writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
         sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}")
         for cluster in sorted(scrna.obs[key_added].unique()):
-            print("Cluster: "+str(cluster))
+            print(f"Cluster: {cluster}")
             result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}")
             result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
-            top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
-            top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
-            top_genes = pd.concat([top_up, top_down[::-1]])
+            
+            # Selecting the top 10 up regulated genes that are also statistically significant.
+            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nlargest(10, "logfoldchanges")
+            # If there are less than 10 sig_up genes, we fill up with non significant genes.
+            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
+            
+            # Selecting the top 10 down regulated genes that are also statistically significant.
+            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nsmallest(10, "logfoldchanges")
+            sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
+            # If there are less than 10 sig_up genes, we fill up with non significant genes.
+            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
+            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
+            down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
+            
+            top_genes = pd.concat([up_selected, down_selected], ignore_index = True)
             plt.figure(figsize = (6, 6))
-            bar_colors = ["red"] * len(top_up) + ["blue"] * len(top_down)
+            bar_colors = ["red"] * len(up_selected) + ["blue"] * len(down_selected)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
             plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
@@ -537,11 +551,24 @@ elif phases.get("comparison") == "execute":
         for stage in stages:
             result = sc.get.rank_genes_groups_df(scrna, group = stage, key = "deg_genes_stage")
             result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
-            top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
-            top_down = result[result["logfoldchanges"] < 0].nsmallest(10, "logfoldchanges")
-            top_genes = pd.concat([top_up, top_down[::-1]])
+            
+            # Selecting the top 10 up regulated genes that are also statistically significant.
+            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nlargest(10, "logfoldchanges")
+            # If there are less than 10 sig_up genes, we fill up with non significant genes.
+            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
+            
+            # Selecting the top 10 down regulated genes that are also statistically significant.
+            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nsmallest(10, "logfoldchanges")
+            sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
+            # If there are less than 10 sig_up genes, we fill up with non significant genes.
+            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
+            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
+            down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
+            
+            top_genes = pd.concat([up_selected, down_selected], ignore_index = True)
             plt.figure(figsize = (6, 6))
-            bar_colors = ["red"] * len(top_up) + ["blue"] * len(top_down)
+            bar_colors = ["red"] * len(up_selected) + ["blue"] * len(down_selected)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
             plt.title(f"Top DEGs for Stage {stage}")
