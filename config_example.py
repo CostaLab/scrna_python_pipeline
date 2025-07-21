@@ -57,6 +57,8 @@ SETTING_VERBOSITY = 3 # verbosity: errors (0), warnings (1), info (2), hints (3)
 DEG_METHOD = "wilcoxon"
 # The maximum number of iterations for the logreg method.
 LOGREG_MAXITER = 100
+# The P value cutoff below which results are considered to be significant.
+P_VALUE_CUTOFF = 0.05
 
 # Number of workers
 WORKER_NUM = 1
