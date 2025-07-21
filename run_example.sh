@@ -14,7 +14,7 @@ date
 
 # Loading the scRNA module.
 module unload R
-module load scRNA
+module unload scRNA
 . /activating/your/miniconda3/etc/profile.d/conda.sh
 conda activate single_cell_pipeline_python
 unset PYTHONPATH
