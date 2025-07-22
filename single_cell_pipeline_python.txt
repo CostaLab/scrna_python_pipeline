@@ -14,4 +14,4 @@ conda activate single_cell_pipeline_python
 conda install -c conda-forge \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
   harmonypy python-igraph leidenalg statsmodels cython setuptools wheel -y
-python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter
+python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter scib-metrics
