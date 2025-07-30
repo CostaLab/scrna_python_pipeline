@@ -8,10 +8,12 @@ module unload R
 conda activate
 
 3) Create the environment single_cell_pipeline_python.
+# harmonypy must either be installed using conda or pip.
 unset PYTHONPATH # The variable has caused problems. 
 conda create -n single_cell_pipeline_python python=3.10 -y
 conda activate single_cell_pipeline_python
 conda install -c conda-forge \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
-  harmonypy python-igraph leidenalg statsmodels cython setuptools wheel -y
+  bioconda::harmonypy python-igraph leidenalg statsmodels cython setuptools wheel bbknn conda-forge::polars cyvcf2
+  pyarrow -y
 python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter scib-metrics
