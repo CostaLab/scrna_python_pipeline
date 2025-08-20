@@ -1,0 +1,96 @@
+# Instructions:
+# Change the parameters according to your needs.
+# int means an integer number (1, 2, 3, ...).
+# float means a float point number (1.23, 4.56, 7.89, ...)
+# string or character means a word like Inf. 
+# Numbers can be used as strings, but the computer will not automatically
+# convert them. Therefore, do not put numbers in quotations like this "1".
+# Only do this if the number is part of a name. So, "Sample_1" is fine.
+# Boolean values are True or False and mean exactly that. Here, you cannot use 
+# quotation marks. Boolean values look like words, but are handled differently.
+
+
+# Phases: the different parts of the pipeline
+# Which parts of the pipeline do you want to execute? load, execute or skip
+# The comparison phase takes the longest time.
+[phases]
+"raw"         = "execute" # Load the data.
+"filter"      = "execute" # Perform QC
+"integration" = "execute" # Integrate the data using harmony
+"cluster"     = "execute" # Perform the clustering using Leiden
+"comparison"  = "execute" # Determine marker genes for each cluster and compare the stages.
+
+
+# Data source: the input data for the pipeline.
+# Where are the input files and to which sample do they belong to?
+[data_src]
+"A_MxCre" = "data/A_MxCre/"
+"B_MxCre" = "data/B_MxCre/"
+"C_Csnk"  = "data/C_Csnk/"
+"D_Csnk"  = "data/D_Csnk/"
+
+
+# Stage list: the different conditions you samples have.
+# You can only set one condition per sample. 
+# More complex condition combinations have to be handled idividually.
+[stage_lst]
+"A_MxCre" = "MxCre"
+"B_MxCre" = "MxCre"
+"C_Csnk"  = "Csnk"
+"D_Csnk"  = "Csnk"
+
+
+# Parameters: the parameters used in the pipeline.
+[options]
+# Where is your output supposed to go?
+output = "/path/to/your/output/folder/"
+# QC parameters
+# Minimum number of cells per gene. int OR float
+min_cells         = 5
+# Minimum number of genes per cell. int OR float
+min_genes         = 50
+# Maximum number of genes per cell. int OR float OR "Inf" (string)
+max_genes         = "Inf"
+# Maximum number of reads per cell. int OR float OR "Inf" (string)
+max_reads         = 20000
+# Maximum number of reads per cell. int OR float OR "Inf" (string)
+min_reads         = 500
+# Maximum percentage of mitochondrial reads per cell. int OR float OR "Inf" (string)
+pct_mito_ceiling = 15
+# Minimum percentage of mitochondrial reads per cell. int OR float
+pct_mito_floor   = 0
+# Maximum percentage of ribosome reads per cell. int OR float OR "Inf" (string)
+pct_ribo_ceiling = 100
+# Minimum percentage of ribosome reads per cell. int OR float
+pct_ribo_floor   = 0
+# Do you want to remove doublets (True) or do you just want to determine them (False)?
+doublet_switch   = false
+
+# How many PCs do you want to use to determine the the variance contribution?
+n_pcs_variance_contribution = 50
+# How many neighbors do you want to use for PCA UMAP?
+n_neighbors_pca = 10
+# How many PCs do you want to use for the PCA UMAP?
+n_pcs_pca = 40
+
+# How many highly variable genes do you want to use for the Harmony integration?
+n_top_genes_integration = 2000
+# How many iterations should harmony try before terminating? Default is 10.
+max_iter_harmony = 10
+# How many neighbors do you want to use for the UMAP? 
+n_neighbors_umap_harmony = 10
+# How many PCs do you want to use to determine the neighbors for the UAMP?
+n_pcs_umap_harmony = 40
+
+# How verbose should the script be?
+setting_verbosity = 3 # verbosity: errors (0), warnings (1), info (2), hints (3)
+
+# What is the test used for DEGs? Select from: "logreg", "t-test", "wilcoxon", "t-test_overestim_var"
+deg_method = "wilcoxon"
+# The maximum number of iterations for the logreg method.
+logreg_maxiter = 100
+# The P value cutoff below which results are considered to be significant.
+p_value_cutoff = 0.05
+
+# Number of workers
+worker_num = 1

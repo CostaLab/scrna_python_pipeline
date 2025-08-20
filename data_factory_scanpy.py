@@ -1,4 +1,8 @@
 # We load the libraries.
+from __future__ import annotations
+from pathlib import Path
+from typing import Dict, Literal # , Optional
+from pydantic import BaseModel, field_validator, ValidationError
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -13,14 +17,120 @@ import skmisc
 import matplotlib.pyplot as plt
 import sys
 import os
+import math
 # import multiprocessing as mp
 from collections import defaultdict
 import glob
+# In python 3.11+ we could use the built-in tomllib.
+# For python 3.10-, we have to use tomli.
+import tomli
+
+
+# Defining some additional parameters.
+PhaseAction = Literal["execute", "load", "skip"]
 sc.logging.print_header()
 sc.settings.set_figure_params(dpi = 300, facecolor = "white")
 
 
-# Defining custom functions.
+# Defining custom functions and classes.
+def _str_inf_to_math_inf(v):
+    """Convert 'Inf'/'inf'/'+inf'/'-inf' to +/- math.inf; leave others unchanged."""
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in {"inf", "+inf"}:
+            return math.inf
+        if s == "-inf":
+            return -math.inf
+    return v
+
+
+class Options(BaseModel):
+    output: Path
+    
+    # QC
+    min_cells: int | float
+    min_genes: int | float
+    max_genes: float | str
+    max_reads: int | float | str
+    min_reads: int | float
+    pct_mito_ceiling: int | float | str
+    pct_mito_floor: int | float
+    pct_ribo_ceiling: int | float | str
+    pct_ribo_floor: int | float
+    doublet_switch: bool
+    
+    # PCA / neighbors / UMAP
+    n_pcs_variance_contribution: int
+    n_neighbors_pca: int
+    n_pcs_pca: int
+    
+    # Harmony
+    n_top_genes_integration: int
+    max_iter_harmony: int
+    n_neighbors_umap_harmony: int
+    n_pcs_umap_harmony: int
+    
+    # Verbosity / DEG / workers
+    setting_verbosity: int
+    deg_method: Literal["logreg", "t-test", "wilcoxon", "t-test_overestim_var"]
+    logreg_maxiter: int
+    p_value_cutoff: float
+    worker_num: int
+    
+    @field_validator("output", mode = "after")
+    def _expand_output(cls, v: Path) -> Path:
+        return v.expanduser()
+    
+    # Convert any "Inf" fields to floats
+    @field_validator(
+        "max_genes",
+        "max_reads",
+        "pct_mito_ceiling",
+        "pct_ribo_ceiling",
+        mode = "before",
+    )
+    def _convert_inf_strings(cls, v):
+        return _str_inf_to_math_inf(v)
+
+
+class Config(BaseModel):
+    phases: Dict[str, PhaseAction]
+    data_src: Dict[str, Path]
+    stage_lst: Dict[str, str]
+    options: Options
+    
+    # Enforce known phase names.
+    @field_validator("phases")
+    def _known_phases(cls, d: Dict[str, PhaseAction]) -> Dict[str, PhaseAction]:
+        allowed = {"raw", "filter", "integration", "cluster", "comparison"}
+        unknown = set(d) - allowed
+        if unknown:
+            raise ValueError(f"Unknown phase(s): {sorted(unknown)}; allowed: {sorted(allowed)}")
+        
+        
+        return d
+    
+    
+    # Expand user paths in data_src
+    @field_validator("data_src", mode = "after")
+    def _expand_paths(cls, d: Dict[str, Path]) -> Dict[str, Path]:
+        return {k: Path(p).expanduser() for k, p in d.items()}
+
+
+def load_config(path: str | Path) -> Config:
+    with open(path, "rb") as f:
+        data = tomli.load(f)
+    try:
+        cfg = Config.model_validate(data)
+    except ValidationError as e:
+        # Friendly message for non-programmers
+        print("\nConfiguration error:\n", e, file=sys.stderr)
+        raise
+    
+    
+    return cfg
+
+
 def check_numeric(value, var_name = "value"):
     if not isinstance(value, (int, float)):
         sys.exit(f"Error: {var_name} must be a number. Got {type(value).__name__} instead.")
@@ -98,45 +208,46 @@ if not os.path.isfile(config_path):
 
 
 print("Loading the config file.", flush = True)
-exec(open(config_path).read())
-sc.settings.verbosity = SETTING_VERBOSITY
+# exec(open(config_path).read())
+cfg = load_config(config_path)
+sc.settings.verbosity = cfg.options.setting_verbosity
 
 
 print("Generating the output folder if needed.", flush = True)
-os.makedirs(output, exist_ok = True)
-qc_dir = os.path.join(output, "qc_plots")
+os.makedirs(cfg.options.output, exist_ok = True)
+qc_dir = os.path.join(cfg.options.output, "qc_plots")
 os.makedirs(qc_dir, exist_ok = True)
-clustering_dir = os.path.join(output, "clustering_plots")
+clustering_dir = os.path.join(cfg.options.output, "clustering_plots")
 os.makedirs(clustering_dir, exist_ok = True)
 
 
 # Checking the parameters.
-check_numeric(MINCELLS, "MINCELLS")
-check_numeric(MINGENES, "MINGENES")
-check_numeric(MINREADS, "MINREADS")
-check_numeric(LOGREG_MAXITER, "LOGREG_MAXITER")
-check_numeric(N_PCS_VARIANCE_CONTRIBUTION, "N_PCS_VARIANCE_CONTRIBUTION")
-check_numeric(N_NEIGHBORS_PCA, "N_NEIGHBORS_PCA")
-check_numeric(N_PCS_PCA, "N_PCS_PCA")
-check_numeric(N_TOP_GENES_INTEGRATION, "N_TOP_GENES_INTEGRATION")
-check_numeric(MAX_ITER_HARMONY, "MAX_ITER_HARMONY")
-check_numeric(N_NEIGHBORS_UMAP_HARMONY, "N_NEIGHBORS_UMAP_HARMONY")
-check_numeric(N_PCS_UMAP_HARMONY, "N_PCS_UMAP_HARMONY")
-check_numeric(P_VALUE_CUTOFF, "P_VALUE_CUTOFF")
+check_numeric(cfg.options.min_cells, "min_cells")
+check_numeric(cfg.options.min_genes, "min_genes")
+check_numeric(cfg.options.min_reads, "min_reads")
+check_numeric(cfg.options.logreg_maxiter, "logreg_maxiter")
+check_numeric(cfg.options.n_pcs_variance_contribution, "n_pcs_variance_contribution")
+check_numeric(cfg.options.n_neighbors_pca, "n_neighbors_pca")
+check_numeric(cfg.options.n_pcs_pca, "n_pcs_pca")
+check_numeric(cfg.options.n_top_genes_integration, "n_top_genes_integration")
+check_numeric(cfg.options.max_iter_harmony, "max_iter_harmony")
+check_numeric(cfg.options.n_neighbors_umap_harmony, "n_neighbors_umap_harmony")
+check_numeric(cfg.options.n_pcs_umap_harmony, "n_pcs_umap_harmony")
+check_numeric(cfg.options.p_value_cutoff, "p_value_cutoff")
 
-MAXGENES         = check_numeric_or_inf(MAXGENES, "MAXGENES")
-MAXREADS         = check_numeric_or_inf(MAXREADS, "MAXREADS")
-PCT_MITO_CEILING = check_numeric_or_inf(PCT_MITO_CEILING, "PCT_MITO_CEILING")
-PCT_MITO_FLOOR   = check_numeric_or_inf(PCT_MITO_FLOOR, "PCT_MITO_FLOOR")
-PCT_RIBO_CEILING = check_numeric_or_inf(PCT_RIBO_CEILING, "PCT_RIBO_CEILING")
-PCT_RIBO_FLOOR   = check_numeric_or_inf(PCT_RIBO_FLOOR, "PCT_RIBO_FLOOR")
+cfg.options.max_genes        = check_numeric_or_inf(cfg.options.max_genes, "max_genes")
+cfg.options.max_reads        = check_numeric_or_inf(cfg.options.max_reads, "max_reads")
+cfg.options.pct_mito_ceiling = check_numeric_or_inf(cfg.options.pct_mito_ceiling, "pct_mito_ceiling")
+cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, "pct_mito_floor")
+cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
+cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
 
 
-if(len(phases) == 0):
+if(len(cfg.phases) == 0):
     raise ValueError("You are not supplying any phases.")
 
 
-for key, val in phases.items():
+for key, val in cfg.phases.items():
     check_strings(val, allowed_values = ("execute", "load", "skip"), var_name = key)
 
 
@@ -148,33 +259,35 @@ required_phases_for_phases = {
 }
 
 for phase, dependents in required_phases_for_phases.items():
-    if phases.get(phase) == "skip":
+    if cfg.phases.get(phase) == "skip":
         for dependent_use in dependents:
-            if phases.get(dependent_use) == "execute":
+            if cfg.phases.get(dependent_use) == "execute":
                 raise ValueError(f"Cannot execute '{dependent_use}' phase without loading or executing '{phase}' phase.")
 
 
 print("We get the list of sample names.", flush = True)
-sample_names = list(stage_lst.keys())
+sample_names = list(cfg.stage_lst.keys())
 
 
 
 
-if phases.get("raw") == "skip":
+if cfg.phases.get("raw") == "skip":
     print("Skipping data loading.", flush = True)
-elif phases.get("raw") == "load":
+elif cfg.phases.get("raw") == "load":
     print("Loading the raw data.", flush = True)
-    if not os.path.isfile(os.path.join(output, "scrna_raw_data.h5ad")):
-        raise FileNotFoundError(f"scrna_raw_data not found: {output}scrna_raw_data.h5ad.")
-    scrna = sc.read_h5ad(os.path.join(output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
-elif phases.get("raw") == "execute":
+    if not os.path.isfile(os.path.join(cfg.options.output, "scrna_raw_data.h5ad")):
+        raise FileNotFoundError(f"scrna_raw_data not found: {cfg.options.output}scrna_raw_data.h5ad.")
+    
+    
+    scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
+elif cfg.phases.get("raw") == "execute":
     print("Loading the data.", flush = True)
-    scrna = sc.read_10x_mtx(data_src[sample_names[0]], cache = True)
+    scrna = sc.read_10x_mtx(cfg.data_src[sample_names[0]], cache = True)
     if(len(sample_names) > 1):
         scrna = [scrna]
         for x in sample_names[1:]:
             print(x, flush = True)
-            scrna.append(sc.read_10x_mtx(data_src[x], cache = True))
+            scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = True))
         scrna_dict = {name: adata for name, adata in zip(sample_names, scrna)}
         scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
     else:
@@ -189,23 +302,25 @@ elif phases.get("raw") == "execute":
     ]
     
     
-    scrna.obs["stage"] = [stage_lst[x] for x in list(scrna.obs["batch"])]
+    scrna.obs["stage"] = [cfg.stage_lst[x] for x in list(scrna.obs["batch"])]
     print("Saving the raw data.", flush = True)
-    scrna.write_h5ad(filename = os.path.join(output, "scrna_raw_data.h5ad"))
+    scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_raw_data.h5ad"))
 
 
 
 
-if phases.get("filter") == "skip":
+if cfg.phases.get("filter") == "skip":
     print("Skipping data filtering.", flush = True)
-elif phases.get("filter") == "load":
+elif cfg.phases.get("filter") == "load":
     print("Loading the filtered data.", flush = True)
-    if not os.path.isfile(os.path.join(output, "scrna_filtered_data.h5ad")):
-        raise FileNotFoundError(f"scrna_filtered_data not found: {output}scrna_filtered_data.h5ad.")
-    scrna = sc.read_h5ad(os.path.join(output, "scrna_filtered_data.h5ad"))
+    if not os.path.isfile(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad")):
+        raise FileNotFoundError(f"scrna_filtered_data not found: {cfg.options.output}scrna_filtered_data.h5ad.")
+    
+    
+    scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
-elif phases.get("filter") == "execute":
+elif cfg.phases.get("filter") == "execute":
     print("Looking into the total counts per condition and the number of genes per counts.", flush = True)
     scrna.var["mito"] = scrna.var_names.str.upper().str.startswith("MT-")
     scrna.var["ribo"] = scrna.var_names.str.upper().str.match(r"^RP[SL]")
@@ -240,13 +355,13 @@ elif phases.get("filter") == "execute":
     
     
     print("Filtering genes and cells.", flush = True)
-    sc.pp.filter_cells(scrna, min_genes = MINGENES)
-    sc.pp.filter_genes(scrna, min_cells = MINCELLS)
-    scrna = scrna[scrna.obs.total_counts > MINREADS, :]
-    scrna = scrna[scrna.obs.pct_counts_mito < PCT_MITO_CEILING, :]
-    scrna = scrna[scrna.obs.pct_counts_mito > PCT_MITO_FLOOR, :]
-    scrna = scrna[scrna.obs.pct_counts_ribo < PCT_RIBO_CEILING, :]
-    scrna = scrna[scrna.obs.pct_counts_ribo > PCT_RIBO_FLOOR, :]
+    sc.pp.filter_cells(scrna, min_genes = cfg.options.min_cells)
+    sc.pp.filter_genes(scrna, min_cells = cfg.options.min_genes)
+    scrna = scrna[scrna.obs.total_counts > cfg.options.min_reads, :]
+    scrna = scrna[scrna.obs.pct_counts_mito < cfg.options.pct_mito_ceiling, :]
+    scrna = scrna[scrna.obs.pct_counts_mito > cfg.options.pct_mito_floor, :]
+    scrna = scrna[scrna.obs.pct_counts_ribo < cfg.options.pct_ribo_ceiling, :]
+    scrna = scrna[scrna.obs.pct_counts_ribo > cfg.options.pct_ribo_floor, :]
     
     
     print("Detecting doublets.", flush = True)
@@ -297,14 +412,14 @@ elif phases.get("filter") == "execute":
     
     
     print("Removing doublets if so desired.", flush = True)
-    if doublet_switch:
+    if cfg.options.doublet_switch:
         print("Removing doublets.", flush = True)
         scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
     
     
     print("Filtering genes and cells after doublet removal.", flush = True)
-    sc.pp.filter_cells(scrna, max_genes = MAXGENES)
-    scrna = scrna[scrna.obs.total_counts < MAXREADS, :]
+    sc.pp.filter_cells(scrna, max_genes = cfg.options.max_genes)
+    scrna = scrna[scrna.obs.total_counts < cfg.options.max_reads, :]
     
     
     print("Generating QC figures after quality control.", flush = True)
@@ -351,32 +466,34 @@ elif phases.get("filter") == "execute":
     print("Saving the filtered data.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
     del scrna.obs["scrublet_predicted_doublet"]
-    scrna.write_h5ad(filename = os.path.join(output, "scrna_filtered_data.h5ad"))
+    scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_filtered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
 
 
-if phases.get("integration") == "skip":
+if cfg.phases.get("integration") == "skip":
     print("Skipping data integration.", flush = True)
-elif phases.get("integration") == "load":
+elif cfg.phases.get("integration") == "load":
     print("Loading the integrated data.", flush = True)
-    if not os.path.isfile(os.path.join(output, "scrna_integrated_data.h5ad")):
-        raise FileNotFoundError(f"scrna_integrated_data not found: {output}scrna_integrated_data.h5ad.")
-    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_integrated_data.h5ad"))
+    if not os.path.isfile(os.path.join(cfg.options.output, "scrna_integrated_data.h5ad")):
+        raise FileNotFoundError(f"scrna_integrated_data not found: {cfg.options.output}scrna_integrated_data.h5ad.")
+    
+    
+    scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_integrated_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
-elif phases.get("integration") == "execute":
+elif cfg.phases.get("integration") == "execute":
     print("Determining highly variable genes.", flush = True)
     # We only scale on the highly variable genes to reduce the amount of memory needed.
-    sc.pp.highly_variable_genes(scrna, n_top_genes = N_TOP_GENES_INTEGRATION, flavor = "seurat_v3", subset = False, layer = "counts")
+    sc.pp.highly_variable_genes(scrna, n_top_genes = cfg.options.n_top_genes_integration, flavor = "seurat_v3", subset = False, layer = "counts")
     # Generating a second object to reduce the memory needed in the integration.
     scrna_hvgs = scrna[:, scrna.var["highly_variable"]].copy()
     
     
     print("Regressing out confounders.", flush = True)
-    sc.pp.regress_out(scrna_hvgs, keys = ["total_counts", "pct_counts_mito", "S_score", "G2M_score"], n_jobs = WORKER_NUM)
+    sc.pp.regress_out(scrna_hvgs, keys = ["total_counts", "pct_counts_mito", "S_score", "G2M_score"], n_jobs = cfg.options.worker_num)
     sc.pp.scale(scrna_hvgs)
     
     
@@ -386,14 +503,14 @@ elif phases.get("integration") == "execute":
     
     print("Looking into the PC variance contribution.", flush = True)
     plt.figure(figsize = (5, 5))
-    sc.pl.pca_variance_ratio(scrna_hvgs, log = True, n_pcs = N_PCS_VARIANCE_CONTRIBUTION, show = False)
+    sc.pl.pca_variance_ratio(scrna_hvgs, log = True, n_pcs = cfg.options.n_pcs_variance_contribution, show = False)
     plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.png"), dpi = 300, bbox_inches = "tight")
     plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.pdf"), bbox_inches = "tight")
     plt.close()
     
     
     print("PCA.", flush = True)
-    sc.pp.neighbors(scrna_hvgs, n_neighbors = N_NEIGHBORS_PCA, n_pcs = N_PCS_PCA, use_rep = "X_pca")
+    sc.pp.neighbors(scrna_hvgs, n_neighbors = cfg.options.n_neighbors_pca, n_pcs = cfg.options.n_pcs_pca, use_rep = "X_pca")
     sc.tl.umap(scrna_hvgs)
     scrna_hvgs.obsm["X_pca_umap"] = scrna_hvgs.obsm["X_umap"] 
     
@@ -401,8 +518,8 @@ elif phases.get("integration") == "execute":
     print("Sample Integration.", flush = True)
     # In case of only one sample (batch), harmony_integrate simply returns the original PCA.
     # This does not cause a crash. To keep everything simple, we will ignore this fact.
-    sce.pp.harmony_integrate(scrna_hvgs, key = "batch", max_iter_harmony = MAX_ITER_HARMONY)
-    sc.pp.neighbors(scrna_hvgs, n_neighbors = N_NEIGHBORS_UMAP_HARMONY, n_pcs = N_PCS_UMAP_HARMONY, use_rep = "X_pca_harmony")
+    sce.pp.harmony_integrate(scrna_hvgs, key = "batch", max_iter_harmony = cfg.options.max_iter_harmony)
+    sc.pp.neighbors(scrna_hvgs, n_neighbors = cfg.options.n_neighbors_umap_harmony, n_pcs = cfg.options.n_pcs_umap_harmony, use_rep = "X_pca_harmony")
     sc.tl.umap(scrna_hvgs)
     scrna_hvgs.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap"] 
     
@@ -450,27 +567,27 @@ elif phases.get("integration") == "execute":
     print("Saving the integrated data.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
     del scrna.obs["scrublet_predicted_doublet"]
-    scrna.write_h5ad(filename = os.path.join(output, "scrna_integrated_data.h5ad"))
+    scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_integrated_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
 
 
-if phases.get("cluster") == "skip":
+if cfg.phases.get("cluster") == "skip":
     print("Skipping data clustering.", flush = True)
-elif phases.get("cluster") == "load":
+elif cfg.phases.get("cluster") == "load":
     print("Loading the clustered data.", flush = True)
-    if not os.path.isfile(os.path.join(output, "scrna_clustered_data.h5ad")):
-        raise FileNotFoundError(f"scrna_clustered_data not found: {output}scrna_clustered_data.h5ad.")
-    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_clustered_data.h5ad"))
+    if not os.path.isfile(os.path.join(cfg.options.output, "scrna_clustered_data.h5ad")):
+        raise FileNotFoundError(f"scrna_clustered_data not found: {cfg.options.output}scrna_clustered_data.h5ad.")
+    scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_clustered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
-elif phases.get("cluster") == "execute":
+elif cfg.phases.get("cluster") == "execute":
     print("Data Clustering.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
         key_added = f"leiden_{res:.1f}"
-        print(key_added)
+        print(key_added, flush = True)
         sc.tl.leiden(scrna, resolution = res, key_added = key_added)
         # fig = sc.pl.umap(scrna, color = key_added, basis = "X_umap_harmony", show = False, return_fig = True)
         fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = key_added, 
@@ -483,47 +600,47 @@ elif phases.get("cluster") == "execute":
     print("Save the clustered object.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
     del scrna.obs["scrublet_predicted_doublet"]
-    scrna.write_h5ad(filename = os.path.join(output, "scrna_clustered_data.h5ad"))
+    scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_clustered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
 
 
 
 
-if phases.get("comparison") == "skip":
-    print("Skipping data comparison.")
-elif phases.get("comparison") == "load":
-    print("Loading the data with comparison results.")
-    if not os.path.isfile(os.path.join(output, "scrna_comparison_data.h5ad")):
-        raise FileNotFoundError(f"scrna_comparison_data not found: {output}scrna_comparison_data.h5ad.")
-    scrna = sc.read_h5ad(filename = os.path.join(output, "scrna_comparison_data.h5ad"))
+if cfg.phases.get("comparison") == "skip":
+    print("Skipping data comparison.", flush = True)
+elif cfg.phases.get("comparison") == "load":
+    print("Loading the data with comparison results.", flush = True)
+    if not os.path.isfile(os.path.join(cfg.options.output, "scrna_comparison_data.h5ad")):
+        raise FileNotFoundError(f"scrna_comparison_data not found: {cfg.options.output}scrna_comparison_data.h5ad.")
+    scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_comparison_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
-elif phases.get("comparison") == "execute":
+elif cfg.phases.get("comparison") == "execute":
     print("Comparing clusters for marker genes.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
         key_added = f"leiden_{res:.1f}"
-        print(key_added)
-        deg_dir = os.path.join(output, f"degs_{key_added}")
+        print(key_added, flush = True)
+        deg_dir = os.path.join(cfg.options.output, f"degs_{key_added}")
         os.makedirs(deg_dir, exist_ok = True)
         writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
-        sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = f"degs_{key_added}")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, key_added = f"degs_{key_added}")
         for cluster in sorted(scrna.obs[key_added].unique()):
-            print(f"Cluster: {cluster}")
+            print(f"Cluster: {cluster}", flush = True)
             result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}")
             result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
             
             # Selecting the top 10 up regulated genes that are also statistically significant.
-            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nlargest(10, "logfoldchanges")
+            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
             up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
             
             # Selecting the top 10 down regulated genes that are also statistically significant.
-            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nsmallest(10, "logfoldchanges")
+            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nsmallest(10, "logfoldchanges")
             sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
+            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
             non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
             down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
             
@@ -543,9 +660,9 @@ elif phases.get("comparison") == "execute":
     print("Comparing stages.", flush = True)
     if(scrna.obs["stage"].nunique() > 1):
         print("We compare the stages.", flush = True)
-        stage_dir = os.path.join(output, "degs_stage")
+        stage_dir = os.path.join(cfg.options.output, "degs_stage")
         os.makedirs(stage_dir, exist_ok = True)
-        sc.tl.rank_genes_groups(scrna, groupby = "stage", method = DEG_METHOD, max_iter = LOGREG_MAXITER, key_added = "deg_genes_stage")
+        sc.tl.rank_genes_groups(scrna, groupby = "stage", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, key_added = "deg_genes_stage")
         stages = scrna.obs["stage"].unique().tolist()
         writer = pd.ExcelWriter(os.path.join(stage_dir, "stage_degs.xlsx"), engine = "xlsxwriter")
         for stage in stages:
@@ -553,16 +670,16 @@ elif phases.get("comparison") == "execute":
             result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
             
             # Selecting the top 10 up regulated genes that are also statistically significant.
-            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nlargest(10, "logfoldchanges")
+            sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
             up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
             
             # Selecting the top 10 down regulated genes that are also statistically significant.
-            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < P_VALUE_CUTOFF)].nsmallest(10, "logfoldchanges")
+            sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nsmallest(10, "logfoldchanges")
             sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= P_VALUE_CUTOFF)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
+            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
             non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
             down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
             
@@ -581,5 +698,5 @@ elif phases.get("comparison") == "execute":
     print("Save the comparison object.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
     del scrna.obs["scrublet_predicted_doublet"]
-    scrna.write_h5ad(filename = os.path.join(output, "scrna_comparison_data.h5ad"))
+    scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_comparison_data.h5ad"))
 
