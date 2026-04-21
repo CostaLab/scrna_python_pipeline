@@ -196,7 +196,7 @@ def process_cluster_task(args):
 
 
 if len(sys.argv) != 2:
-    raise ValueError("Usage: python data_factory_scanpy.py /path/to/config.py")
+    raise ValueError("Usage: python data_factory_scanpy.py /path/to/config.toml")
 
 
 # Where is the config file located?
@@ -253,6 +253,7 @@ for key, val in cfg.phases.items():
 
 # We check if a phase has a required phase.
 required_phases_for_phases = {
+    "raw": ["filter"],
     "filter": ["integration"],
     "integration": ["cluster"],
     "cluster": ["comparison"]
@@ -288,7 +289,6 @@ elif cfg.phases.get("raw") == "execute":
         for x in sample_names[1:]:
             print(x, flush = True)
             scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = True))
-        scrna_dict = {name: adata for name, adata in zip(sample_names, scrna)}
         scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
     else:
         scrna.obs["batch"] = sample_names[0]
@@ -367,7 +367,6 @@ elif cfg.phases.get("filter") == "execute":
     print("Detecting doublets.", flush = True)
     scrna.layers["counts"] = scrna.X.copy()
     doublet_scores = []
-    predicted_doublets = []
     for batch in scrna.obs["batch"].unique():
         adata_batch = scrna[scrna.obs["batch"] == batch]
         counts_matrix = adata_batch.layers["counts"].toarray() if hasattr(adata_batch.layers["counts"], "toarray") else adata_batch.layers["counts"]
@@ -380,7 +379,7 @@ elif cfg.phases.get("filter") == "execute":
         y = scrub._embeddings["UMAP"][:,1]
         predicted_doublets_index = np.argsort(preds)
         plt.figure(figsize=(7, 6))
-        plt.scatter(x, y, c = preds[predicted_doublets_index], cmap = scr.custom_cmap([[.7,.7,.7], [1,0,0]]), s = 2)
+        plt.scatter(x[predicted_doublets_index], y[predicted_doublets_index], c = preds[predicted_doublets_index], cmap = scr.custom_cmap([[.7,.7,.7], [1,0,0]]), s = 2)
         plt.xlabel("UMAP 1")
         plt.ylabel("UMAP 2")
         plt.title(batch)
@@ -450,7 +449,7 @@ elif cfg.phases.get("filter") == "execute":
     # They are from Regev Lab (regev_lab_cell_cycle_genes.txt)
     # Right now, they are only for humans. An implementation for mouse is necessary.
     cell_cycle_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7",
-                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
+                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDCcell_cycle_genes45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
                         "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B", "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1",
                         "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2", "G2E3", "GAS2L3", "CBX5", "CENPA"]
     s_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7", "POLD3",
@@ -633,15 +632,15 @@ elif cfg.phases.get("comparison") == "execute":
             # Selecting the top 10 up regulated genes that are also statistically significant.
             sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            non_sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].nlargest(10 - len(sig_up), "logfoldchanges")
             up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
             
             # Selecting the top 10 down regulated genes that are also statistically significant.
             sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nsmallest(10, "logfoldchanges")
             sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
-            # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
-            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
+            # If there are less than 10 sig_down genes, we fill up with non significant genes.
+            non_sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].nsmallest(10 - len(sig_down), "logfoldchanges")
+            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = False)
             down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
             
             top_genes = pd.concat([up_selected, down_selected], ignore_index = True)
@@ -672,15 +671,15 @@ elif cfg.phases.get("comparison") == "execute":
             # Selecting the top 10 up regulated genes that are also statistically significant.
             sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_up = (result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_up))).nlargest(10, "logfoldchanges")
+            non_sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].nlargest(10 - len(sig_up), "logfoldchanges")
             up_selected = pd.concat([sig_up, non_sig_up], ignore_index = True)
             
             # Selecting the top 10 down regulated genes that are also statistically significant.
             sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nsmallest(10, "logfoldchanges")
             sig_down = sig_down.sort_values("logfoldchanges", ascending = False)
-            # If there are less than 10 sig_up genes, we fill up with non significant genes.
-            non_sig_down = (result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].head(10 - len(sig_down))).nsmallest(10, "logfoldchanges")
-            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = True)
+            # If there are less than 10 sig_down genes, we fill up with non significant genes.
+            non_sig_down = result[(result["logfoldchanges"] <= 0) & (result["pvals_adj"] >= cfg.options.p_value_cutoff)].nsmallest(10 - len(sig_down), "logfoldchanges")
+            non_sig_down = non_sig_down.sort_values("logfoldchanges", ascending = False)
             down_selected = pd.concat([sig_down, non_sig_down], ignore_index = True)
             
             top_genes = pd.concat([up_selected, down_selected], ignore_index = True)
