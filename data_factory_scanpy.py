@@ -29,7 +29,6 @@ import tomli
 # Defining some additional parameters.
 PhaseAction = Literal["execute", "load", "skip"]
 sc.logging.print_header()
-sc.settings.set_figure_params(dpi = 300, facecolor = "white")
 
 
 # Defining custom functions and classes.
@@ -76,6 +75,7 @@ class Options(BaseModel):
     logreg_maxiter: int
     p_value_cutoff: float
     worker_num: int
+    figure_resolution_dpi: int
     
     @field_validator("output", mode = "after")
     def _expand_output(cls, v: Path) -> Path:
@@ -124,7 +124,7 @@ def load_config(path: str | Path) -> Config:
         cfg = Config.model_validate(data)
     except ValidationError as e:
         # Friendly message for non-programmers
-        print("\nConfiguration error:\n", e, file=sys.stderr)
+        print("\nConfiguration error:\n", e, file = sys.stderr)
         raise
     
     
@@ -139,6 +139,7 @@ def check_numeric(value, var_name = "value"):
 def check_strings(value, allowed_values, var_name = "value"):
     if not isinstance(value, str):
         sys.exit(f"Error: {var_name} must be a string. Got {type(value).__name__} instead.")
+    
     if not value in allowed_values:
         sys.exit(f"Error: {var_name} must be one of {allowed_values}.")
 
@@ -176,7 +177,7 @@ def process_cluster_task(args):
     
     # Save CSV
     csv_path = os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.csv")
-    result.to_csv(csv_path, index=False)
+    result.to_csv(csv_path, index = False)
     
     # Plot top genes
     top_up = result[result["logfoldchanges"] > 0].nlargest(10, "logfoldchanges")
@@ -189,7 +190,7 @@ def process_cluster_task(args):
     plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
     plt.tight_layout()
     plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"), bbox_inches = "tight")
-    plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi=300)
+    plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
     plt.close()
     
     return key_added, cluster, csv_path
@@ -234,6 +235,7 @@ check_numeric(cfg.options.max_iter_harmony, "max_iter_harmony")
 check_numeric(cfg.options.n_neighbors_umap_harmony, "n_neighbors_umap_harmony")
 check_numeric(cfg.options.n_pcs_umap_harmony, "n_pcs_umap_harmony")
 check_numeric(cfg.options.p_value_cutoff, "p_value_cutoff")
+check_numeric(cfg.options.figure_resolution_dpi, "figure_resolution_dpi")
 
 cfg.options.max_genes        = check_numeric_or_inf(cfg.options.max_genes, "max_genes")
 cfg.options.max_reads        = check_numeric_or_inf(cfg.options.max_reads, "max_reads")
@@ -241,6 +243,10 @@ cfg.options.pct_mito_ceiling = check_numeric_or_inf(cfg.options.pct_mito_ceiling
 cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, "pct_mito_floor")
 cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
 cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
+
+
+# Setting plotting parameters
+sc.settings.set_figure_params(dpi = cfg.options.figure_resolution_dpi, facecolor = "white")
 
 
 if(len(cfg.phases) == 0):
@@ -347,10 +353,8 @@ elif cfg.phases.get("filter") == "execute":
         ax.set_title(f"{y_labels.get(var, var)} by Sample")
         plt.xticks(rotation = 45, ha = "right")
         plt.tight_layout()
-        pdf_path = os.path.join(qc_dir, f"{var}_violin_raw.pdf")
-        plt.savefig(pdf_path, bbox_inches = "tight")
-        png_path = os.path.join(qc_dir, f"{var}_violin_raw.png")
-        plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
+        plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.pdf"), bbox_inches = "tight")
+        plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
     
     
@@ -384,10 +388,8 @@ elif cfg.phases.get("filter") == "execute":
         plt.ylabel("UMAP 2")
         plt.title(batch)
         plt.tight_layout()
-        pdf_path = os.path.join(qc_dir, f"{batch}_doublet_UMAP.pdf")
-        plt.savefig(pdf_path, bbox_inches = "tight")
-        png_path = os.path.join(qc_dir, f"{batch}_doublet_UMAP.png")
-        plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
+        plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.pdf"), bbox_inches = "tight")
+        plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
     
     
@@ -406,7 +408,7 @@ elif cfg.phases.get("filter") == "execute":
     plt.xticks(rotation = 45, ha = "right")
     plt.tight_layout()
     plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.pdf"), bbox_inches = "tight")
-    plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.png"), bbox_inches = "tight", dpi = 300)
+    plt.savefig(os.path.join(qc_dir, "doublet_barplot_filtered.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
     plt.close()
     
     
@@ -431,10 +433,8 @@ elif cfg.phases.get("filter") == "execute":
         ax.set_title(f"{y_labels.get(var, var)} by Sample")
         plt.xticks(rotation = 45, ha = "right")
         plt.tight_layout()
-        pdf_path = os.path.join(qc_dir, f"{var}_violin_filtered.pdf")
-        plt.savefig(pdf_path, bbox_inches = "tight")
-        png_path = os.path.join(qc_dir, f"{var}_violin_filtered.png")
-        plt.savefig(png_path, bbox_inches = "tight", dpi = 300)
+        plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.pdf"), bbox_inches = "tight")
+        plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
     
     
@@ -503,7 +503,7 @@ elif cfg.phases.get("integration") == "execute":
     print("Looking into the PC variance contribution.", flush = True)
     plt.figure(figsize = (5, 5))
     sc.pl.pca_variance_ratio(scrna_hvgs, log = True, n_pcs = cfg.options.n_pcs_variance_contribution, show = False)
-    plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.png"), dpi = 300, bbox_inches = "tight")
+    plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.png"), dpi = cfg.options.figure_resolution_dpi, bbox_inches = "tight")
     plt.savefig(os.path.join(qc_dir, "pca_variance_ratio.pdf"), bbox_inches = "tight")
     plt.close()
     
@@ -543,7 +543,7 @@ elif cfg.phases.get("integration") == "execute":
     fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "batch", 
                           show = False, return_fig = True, legend_fontsize = 8)
     fig.savefig(os.path.join(clustering_dir, "umap_sample.pdf"), bbox_inches = "tight")
-    fig.savefig(os.path.join(clustering_dir, "umap_sample.png"), bbox_inches = "tight", dpi = 300)
+    fig.savefig(os.path.join(clustering_dir, "umap_sample.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
     plt.close(fig)
     
     
@@ -551,7 +551,7 @@ elif cfg.phases.get("integration") == "execute":
     fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "stage", 
                           show = False, return_fig = True, legend_fontsize = 8)
     fig.savefig(os.path.join(clustering_dir, "umap_stage.pdf"), bbox_inches = "tight")
-    fig.savefig(os.path.join(clustering_dir, "umap_stage.png"), bbox_inches = "tight", dpi = 300)
+    fig.savefig(os.path.join(clustering_dir, "umap_stage.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
     plt.close(fig)
     
     
@@ -559,7 +559,7 @@ elif cfg.phases.get("integration") == "execute":
     fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = "phase", 
                           show = False, return_fig = True, legend_fontsize = 8)
     fig.savefig(os.path.join(clustering_dir, "umap_phase.pdf"), bbox_inches = "tight")
-    fig.savefig(os.path.join(clustering_dir, "umap_phase.png"), bbox_inches = "tight", dpi = 300)
+    fig.savefig(os.path.join(clustering_dir, "umap_phase.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
     plt.close(fig)
     
     
@@ -592,7 +592,7 @@ elif cfg.phases.get("cluster") == "execute":
         fig = sc.pl.embedding(scrna, basis = "X_umap_harmony", color = key_added, 
                               show = False, return_fig = True, legend_fontsize = 8)
         fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.pdf"), bbox_inches = "tight")
-        fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), bbox_inches = "tight", dpi = 300)
+        fig.savefig(os.path.join(clustering_dir, f"umap_{key_added}.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close(fig)
     
     
@@ -651,7 +651,7 @@ elif cfg.phases.get("comparison") == "execute":
             plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
             plt.tight_layout()
             plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"), bbox_inches = "tight")
-            plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi = 300)
+            plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
             plt.close()
         writer.close()
     
@@ -690,7 +690,7 @@ elif cfg.phases.get("comparison") == "execute":
             plt.title(f"Top DEGs for Stage {stage}")
             plt.tight_layout()
             plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"), bbox_inches = "tight")
-            plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = 300)
+            plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
             plt.close()
         writer.close()
     

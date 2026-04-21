@@ -53,7 +53,7 @@ min_genes         = 50
 max_genes         = "Inf"
 # Maximum number of reads per cell. int OR float OR "Inf" (string)
 max_reads         = 20000
-# Maximum number of reads per cell. int OR float OR "Inf" (string)
+# Minimum number of reads per cell. int OR float OR "Inf" (string)
 min_reads         = 500
 # Maximum percentage of mitochondrial reads per cell. int OR float OR "Inf" (string)
 pct_mito_ceiling = 15
@@ -63,8 +63,9 @@ pct_mito_floor   = 0
 pct_ribo_ceiling = 100
 # Minimum percentage of ribosome reads per cell. int OR float
 pct_ribo_floor   = 0
-# Do you want to remove doublets (True) or do you just want to determine them (False)?
-doublet_switch   = False
+# Do you want to remove doublets (true) or do you just want to determine them (false)?
+# Also,toml needs true/false NOT False/True. This is not python convention.
+doublet_switch   = false
 
 # How many PCs do you want to use to determine the the variance contribution?
 n_pcs_variance_contribution = 50
@@ -94,3 +95,8 @@ p_value_cutoff = 0.05
 
 # Number of workers
 worker_num = 1
+
+# Dots Per Inch (DPI) of the plots. Higher means sharper images, but larger files. 300 is a good standard.
+# If you set this to high, you get giant images that you cannot use. Values over 600 do not produce good
+# results.
+figure_resolution_dpi = 300
