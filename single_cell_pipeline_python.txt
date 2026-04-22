@@ -10,10 +10,24 @@ conda activate
 3) Create the environment single_cell_pipeline_python.
 # harmonypy must either be installed using conda or pip.
 unset PYTHONPATH # The variable has caused problems. 
-conda create -n single_cell_pipeline_python python=3.10 -y
+conda create -n single_cell_pipeline_python python=3.11 -y
 conda activate single_cell_pipeline_python
 conda install -c conda-forge \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
-  bioconda::harmonypy python-igraph leidenalg statsmodels cython setuptools wheel bbknn conda-forge::polars cyvcf2
-  pyarrow -y
+  bioconda::harmonypy python-igraph leidenalg statsmodels cython setuptools wheel bbknn conda-forge::polars cyvcf2 \
+  pyarrow conda-forge::pydantic numba tqdm -y
 python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter scib-metrics
+
+4) So, we can easily reconstruct the environment, I export it. Just to be save.
+conda list gives us a specific list of the packages with URL and exact build.
+
+conda env export -n single_cell_pipeline_python --file single_cell_pipeline_python.yaml
+conda list --explicit -n single_cell_pipeline_python > single_cell_pipeline_python_explicit.txt
+
+5) Now, I add decontX-python. This is not part of the original pipeline, but become necessary after the demultiplexing of the
+new MF samples. We should estimate the ambientRNA to demultiplex the samples using vireo.
+First, we install some dependencies for decontx-python so that they are tracked by conda. Then we install decontx-python using pip.
+Since pip will also want to install dependencies this could lead to the environment breaking. This way, we prevent this.
+# conda install -c conda-forge numba tqdm -y # Already installed above.
+pip install decontx-python --no-deps
+

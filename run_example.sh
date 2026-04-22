@@ -19,5 +19,5 @@ module unload scRNA
 conda activate single_cell_pipeline_python
 unset PYTHONPATH
 
-Rscript "data_factory_scanpy.py" \
+python "data_factory_scanpy.py" \
 	"/path/to/config.toml"
