@@ -1,37 +1,19 @@
 # We load the libraries.
 from __future__ import annotations
+import os
+import sys
+from pydantic import BaseModel, field_validator, ValidationError
 from pathlib import Path
 from typing import Dict, Literal # , Optional
-from pydantic import BaseModel, field_validator, ValidationError
-import numpy as np
-import pandas as pd
-import scanpy as sc
-import scanpy.external as sce
-import seaborn as sns
-import harmonypy as hm
-import anndata as ad
-import re
-import gc
-import scrublet as scr
-import skmisc
-import matplotlib.pyplot as plt
-import sys
-import os
 import math
-# import multiprocessing as mp
-from collections import defaultdict
-import glob
 # In python 3.11+ we could use the built-in tomllib.
+import tomllib
 # For python 3.10-, we have to use tomli.
-import tomli
+# import tomli
 
-
-# Defining some additional parameters.
+# Phase action values.
 PhaseAction = Literal["execute", "load", "skip"]
-sc.logging.print_header()
 
-
-# Defining custom functions and classes.
 def _str_inf_to_math_inf(v):
     """Convert 'Inf'/'inf'/'+inf'/'-inf' to +/- math.inf; leave others unchanged."""
     if isinstance(v, str):
@@ -41,7 +23,6 @@ def _str_inf_to_math_inf(v):
         if s == "-inf":
             return -math.inf
     return v
-
 
 class Options(BaseModel):
     output: Path
@@ -119,7 +100,7 @@ class Config(BaseModel):
 
 def load_config(path: str | Path) -> Config:
     with open(path, "rb") as f:
-        data = tomli.load(f)
+        data = tomllib.load(f)
     try:
         cfg = Config.model_validate(data)
     except ValidationError as e:
@@ -158,6 +139,73 @@ def check_numeric_or_inf(value, var_name = "value"):
         sys.exit(f"Error: {var_name} must be a number or 'Inf' (string). Got {type(value).__name__} instead.")
 
 
+if len(sys.argv) != 2:
+    raise ValueError("Usage: python data_factory_scanpy.py /path/to/config.toml")
+
+
+# Where is the config file located?
+config_path = sys.argv[1]
+
+
+if not os.path.isfile(config_path):
+    raise FileNotFoundError(f"Config file not found: {config_path}.")
+
+
+print("Loading the config file.", flush = True)
+# exec(open(config_path).read())
+cfg = load_config(config_path)
+
+
+# Checking the parameters.
+check_numeric(cfg.options.min_cells, "min_cells")
+check_numeric(cfg.options.min_genes, "min_genes")
+check_numeric(cfg.options.min_reads, "min_reads")
+check_numeric(cfg.options.logreg_maxiter, "logreg_maxiter")
+check_numeric(cfg.options.n_pcs_variance_contribution, "n_pcs_variance_contribution")
+check_numeric(cfg.options.n_neighbors_pca, "n_neighbors_pca")
+check_numeric(cfg.options.n_pcs_pca, "n_pcs_pca")
+check_numeric(cfg.options.n_top_genes_integration, "n_top_genes_integration")
+check_numeric(cfg.options.max_iter_harmony, "max_iter_harmony")
+check_numeric(cfg.options.n_neighbors_umap_harmony, "n_neighbors_umap_harmony")
+check_numeric(cfg.options.n_pcs_umap_harmony, "n_pcs_umap_harmony")
+check_numeric(cfg.options.p_value_cutoff, "p_value_cutoff")
+check_numeric(cfg.options.figure_resolution_dpi, "figure_resolution_dpi")
+
+cfg.options.max_genes        = check_numeric_or_inf(cfg.options.max_genes, "max_genes")
+cfg.options.max_reads        = check_numeric_or_inf(cfg.options.max_reads, "max_reads")
+cfg.options.pct_mito_ceiling = check_numeric_or_inf(cfg.options.pct_mito_ceiling, "pct_mito_ceiling")
+cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, "pct_mito_floor")
+cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
+cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
+
+
+os.environ["OPENBLAS_NUM_THREADS"] = str(cfg.options.worker_num)
+os.environ["OMP_NUM_THREADS"] = str(cfg.options.worker_num)
+os.environ["MKL_NUM_THREADS"] = str(cfg.options.worker_num)
+os.environ["NUMEXPR_NUM_THREADS"] = str(cfg.options.worker_num)
+
+import numpy as np
+import pandas as pd
+import scanpy as sc
+# import scanpy.external as sce
+import seaborn as sns
+import harmonypy as hm
+import anndata as ad
+# import re
+import gc
+import scrublet as scr
+# import skmisc
+import matplotlib.pyplot as plt
+# import multiprocessing as mp
+# from collections import defaultdict
+# import glob
+
+
+# Defining some additional parameters.
+sc.logging.print_header()
+
+
+# Defining custom functions and classes.
 def process_cluster_task(args):
     res, cluster, key_added, output, deg_method, max_iter = args
     deg_dir = os.path.join(output, f"degs_{key_added}")
@@ -196,22 +244,6 @@ def process_cluster_task(args):
     return key_added, cluster, csv_path
 
 
-if len(sys.argv) != 2:
-    raise ValueError("Usage: python data_factory_scanpy.py /path/to/config.toml")
-
-
-# Where is the config file located?
-config_path = sys.argv[1]
-
-
-if not os.path.isfile(config_path):
-    raise FileNotFoundError(f"Config file not found: {config_path}.")
-
-
-print("Loading the config file.", flush = True)
-# exec(open(config_path).read())
-cfg = load_config(config_path)
-sc.settings.verbosity = cfg.options.setting_verbosity
 
 
 print("Generating the output folder if needed.", flush = True)
@@ -222,31 +254,10 @@ clustering_dir = os.path.join(cfg.options.output, "clustering_plots")
 os.makedirs(clustering_dir, exist_ok = True)
 
 
-# Checking the parameters.
-check_numeric(cfg.options.min_cells, "min_cells")
-check_numeric(cfg.options.min_genes, "min_genes")
-check_numeric(cfg.options.min_reads, "min_reads")
-check_numeric(cfg.options.logreg_maxiter, "logreg_maxiter")
-check_numeric(cfg.options.n_pcs_variance_contribution, "n_pcs_variance_contribution")
-check_numeric(cfg.options.n_neighbors_pca, "n_neighbors_pca")
-check_numeric(cfg.options.n_pcs_pca, "n_pcs_pca")
-check_numeric(cfg.options.n_top_genes_integration, "n_top_genes_integration")
-check_numeric(cfg.options.max_iter_harmony, "max_iter_harmony")
-check_numeric(cfg.options.n_neighbors_umap_harmony, "n_neighbors_umap_harmony")
-check_numeric(cfg.options.n_pcs_umap_harmony, "n_pcs_umap_harmony")
-check_numeric(cfg.options.p_value_cutoff, "p_value_cutoff")
-check_numeric(cfg.options.figure_resolution_dpi, "figure_resolution_dpi")
-
-cfg.options.max_genes        = check_numeric_or_inf(cfg.options.max_genes, "max_genes")
-cfg.options.max_reads        = check_numeric_or_inf(cfg.options.max_reads, "max_reads")
-cfg.options.pct_mito_ceiling = check_numeric_or_inf(cfg.options.pct_mito_ceiling, "pct_mito_ceiling")
-cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, "pct_mito_floor")
-cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
-cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
-
-
 # Setting plotting parameters
 sc.settings.set_figure_params(dpi = cfg.options.figure_resolution_dpi, facecolor = "white")
+sc.settings.verbosity = cfg.options.setting_verbosity
+sc.settings.n_jobs = cfg.options.worker_num
 
 
 if(len(cfg.phases) == 0):
@@ -289,12 +300,15 @@ elif cfg.phases.get("raw") == "load":
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
 elif cfg.phases.get("raw") == "execute":
     print("Loading the data.", flush = True)
-    scrna = sc.read_10x_mtx(cfg.data_src[sample_names[0]], cache = True)
+    print(sample_names[0], flush = True)
+    scrna = sc.read_10x_mtx(cfg.data_src[sample_names[0]], cache = False)
     if(len(sample_names) > 1):
         scrna = [scrna]
         for x in sample_names[1:]:
             print(x, flush = True)
-            scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = True))
+            scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = False))
+        
+        
         scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
     else:
         scrna.obs["batch"] = sample_names[0]
@@ -317,6 +331,8 @@ elif cfg.phases.get("raw") == "execute":
 
 if cfg.phases.get("filter") == "skip":
     print("Skipping data filtering.", flush = True)
+    
+    
 elif cfg.phases.get("filter") == "load":
     print("Loading the filtered data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad")):
@@ -326,6 +342,8 @@ elif cfg.phases.get("filter") == "load":
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
+    
+    
 elif cfg.phases.get("filter") == "execute":
     print("Looking into the total counts per condition and the number of genes per counts.", flush = True)
     scrna.var["mito"] = scrna.var_names.str.upper().str.startswith("MT-")
@@ -359,8 +377,8 @@ elif cfg.phases.get("filter") == "execute":
     
     
     print("Filtering genes and cells.", flush = True)
-    sc.pp.filter_cells(scrna, min_genes = cfg.options.min_cells)
-    sc.pp.filter_genes(scrna, min_cells = cfg.options.min_genes)
+    sc.pp.filter_cells(scrna, min_genes = cfg.options.min_genes)
+    sc.pp.filter_genes(scrna, min_cells = cfg.options.min_cells)
     scrna = scrna[scrna.obs.total_counts > cfg.options.min_reads, :]
     scrna = scrna[scrna.obs.pct_counts_mito < cfg.options.pct_mito_ceiling, :]
     scrna = scrna[scrna.obs.pct_counts_mito > cfg.options.pct_mito_floor, :]
@@ -449,7 +467,7 @@ elif cfg.phases.get("filter") == "execute":
     # They are from Regev Lab (regev_lab_cell_cycle_genes.txt)
     # Right now, they are only for humans. An implementation for mouse is necessary.
     cell_cycle_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7",
-                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDCcell_cycle_genes45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
+                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
                         "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B", "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1",
                         "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2", "G2E3", "GAS2L3", "CBX5", "CENPA"]
     s_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7", "POLD3",
@@ -483,6 +501,8 @@ elif cfg.phases.get("integration") == "load":
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_integrated_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
+    
+    
 elif cfg.phases.get("integration") == "execute":
     print("Determining highly variable genes.", flush = True)
     # We only scale on the highly variable genes to reduce the amount of memory needed.
@@ -517,7 +537,16 @@ elif cfg.phases.get("integration") == "execute":
     print("Sample Integration.", flush = True)
     # In case of only one sample (batch), harmony_integrate simply returns the original PCA.
     # This does not cause a crash. To keep everything simple, we will ignore this fact.
-    sce.pp.harmony_integrate(scrna_hvgs, key = "batch", max_iter_harmony = cfg.options.max_iter_harmony)
+    # sce.pp.harmony_integrate has a bug, in which the result is transposed. This breaks the pipeline.
+    # https://github.com/scverse/scanpy/issues/3940
+    # sce.pp.harmony_integrate(scrna_hvgs, key = "batch", max_iter_harmony = cfg.options.max_iter_harmony)
+    # That is why we use the explicit call here.
+    harmony_out = hm.run_harmony(data_mat = scrna_hvgs.obsm["X_pca"],
+                                 meta_data = scrna_hvgs.obs,
+                                 vars_use = "batch", 
+                                 max_iter_harmony = cfg.options.max_iter_harmony,)
+    scrna_hvgs.obsm["X_pca_harmony"] = harmony_out.Z_corr
+    
     sc.pp.neighbors(scrna_hvgs, n_neighbors = cfg.options.n_neighbors_umap_harmony, n_pcs = cfg.options.n_pcs_umap_harmony, use_rep = "X_pca_harmony")
     sc.tl.umap(scrna_hvgs)
     scrna_hvgs.obsm["X_umap_harmony"] = scrna_hvgs.obsm["X_umap"] 
@@ -575,13 +604,19 @@ elif cfg.phases.get("integration") == "execute":
 
 if cfg.phases.get("cluster") == "skip":
     print("Skipping data clustering.", flush = True)
+    
+    
 elif cfg.phases.get("cluster") == "load":
     print("Loading the clustered data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_clustered_data.h5ad")):
         raise FileNotFoundError(f"scrna_clustered_data not found: {cfg.options.output}scrna_clustered_data.h5ad.")
+    
+    
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_clustered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
+    
+    
 elif cfg.phases.get("cluster") == "execute":
     print("Data Clustering.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
