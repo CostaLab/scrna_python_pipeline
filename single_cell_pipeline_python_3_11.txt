@@ -10,7 +10,7 @@ conda activate
 3) Create the environment single_cell_pipeline_python.
 # harmonypy must either be installed using conda or pip.
 unset PYTHONPATH # The variable has caused problems. 
-conda create -n single_cell_pipeline_python python=3.10 -y
+conda create -n single_cell_pipeline_python python=3.11 -y
 conda activate single_cell_pipeline_python
 conda install -c conda-forge \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
@@ -30,3 +30,4 @@ First, we install some dependencies for decontx-python so that they are tracked 
 Since pip will also want to install dependencies this could lead to the environment breaking. This way, we prevent this.
 # conda install -c conda-forge numba tqdm -y # Already installed above.
 pip install decontx-python --no-deps
+
