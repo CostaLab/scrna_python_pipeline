@@ -679,7 +679,7 @@ elif cfg.phases.get("comparison") == "execute":
         deg_dir = os.path.join(cfg.options.output, f"degs_{key_added}")
         os.makedirs(deg_dir, exist_ok = True)
         writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
-        sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, key_added = f"degs_{key_added}")
+        sc.tl.rank_genes_groups(scrna, groupby = key_added, reference = "rest", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, pts = True, key_added = f"degs_{key_added}")
         for cluster in sorted(scrna.obs[key_added].unique()):
             print(f"Cluster: {cluster}", flush = True)
             result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}")
@@ -717,7 +717,7 @@ elif cfg.phases.get("comparison") == "execute":
         print("We compare the stages.", flush = True)
         stage_dir = os.path.join(cfg.options.output, "degs_stage")
         os.makedirs(stage_dir, exist_ok = True)
-        sc.tl.rank_genes_groups(scrna, groupby = "stage", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, key_added = "deg_genes_stage")
+        sc.tl.rank_genes_groups(scrna, groupby = "stage", method = cfg.options.deg_method, max_iter = cfg.options.logreg_maxiter, pts = True, key_added = "deg_genes_stage")
         stages = scrna.obs["stage"].unique().tolist()
         writer = pd.ExcelWriter(os.path.join(stage_dir, "stage_degs.xlsx"), engine = "xlsxwriter")
         for stage in stages:
