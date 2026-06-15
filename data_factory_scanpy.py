@@ -178,6 +178,11 @@ cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, 
 cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
 cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
 
+# What are the variables we want to regress out?
+regress_keys = list(cfg.regression.keys)
+if cfg.regression.enabled and len(regress_keys) == 0:
+    sys.exit("Error: You want to regress out confounders, but you list is empty.")
+
 
 os.environ["OPENBLAS_NUM_THREADS"] = str(cfg.options.worker_num)
 os.environ["OMP_NUM_THREADS"] = str(cfg.options.worker_num)
@@ -295,7 +300,7 @@ elif cfg.phases.get("raw") == "load":
     print("Loading the raw data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_raw_data.h5ad")):
         raise FileNotFoundError(f"scrna_raw_data not found: {cfg.options.output}scrna_raw_data.h5ad.")
-    
+    # end if statement
     
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
 elif cfg.phases.get("raw") == "execute":
@@ -307,12 +312,12 @@ elif cfg.phases.get("raw") == "execute":
         for x in sample_names[1:]:
             print(x, flush = True)
             scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = False))
-        
+        # end for loop
         
         scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
     else:
         scrna.obs["batch"] = sample_names[0]
-    
+    # end if statement
     
     # Changing the names to have the form [SAMPLE]_[CELL_ID]-1.
     # This is done, because of tradition.
@@ -337,7 +342,7 @@ elif cfg.phases.get("filter") == "load":
     print("Loading the filtered data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad")):
         raise FileNotFoundError(f"scrna_filtered_data not found: {cfg.options.output}scrna_filtered_data.h5ad.")
-    
+    # end if statement
     
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
@@ -374,7 +379,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    
+    # end for loop
     
     print("Filtering genes and cells.", flush = True)
     sc.pp.filter_cells(scrna, min_genes = cfg.options.min_genes)
@@ -409,7 +414,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    
+    # end for loop
     
     print("Plotting the number of doublets per sample.", flush = True)
     doublet_counts = (
@@ -434,7 +439,7 @@ elif cfg.phases.get("filter") == "execute":
     if cfg.options.doublet_switch:
         print("Removing doublets.", flush = True)
         scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
-    
+    # end if statement
     
     print("Filtering genes and cells after doublet removal.", flush = True)
     sc.pp.filter_cells(scrna, max_genes = cfg.options.max_genes)
@@ -454,7 +459,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    
+    # end for loop
     
     print("Log normalizing the data.", flush = True)
     sc.pp.normalize_total(scrna, target_sum = 1e4)
@@ -479,6 +484,7 @@ elif cfg.phases.get("filter") == "execute":
     s_genes = [x for x in s_genes if x in scrna.var_names]
     g2m_genes = [x for x in g2m_genes if x in scrna.var_names]
     sc.tl.score_genes_cell_cycle(scrna, s_genes = s_genes, g2m_genes = g2m_genes)
+    scrna.obs["CC_difference"] = scrna.obs["S_score"] - scrna.obs["G2M_score"]
     
     print("Saving the filtered data.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
@@ -496,7 +502,7 @@ elif cfg.phases.get("integration") == "load":
     print("Loading the integrated data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_integrated_data.h5ad")):
         raise FileNotFoundError(f"scrna_integrated_data not found: {cfg.options.output}scrna_integrated_data.h5ad.")
-    
+    # end if statement
     
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_integrated_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
@@ -511,8 +517,16 @@ elif cfg.phases.get("integration") == "execute":
     scrna_hvgs = scrna[:, scrna.var["highly_variable"]].copy()
     
     
-    print("Regressing out confounders.", flush = True)
-    sc.pp.regress_out(scrna_hvgs, keys = ["total_counts", "pct_counts_mito", "S_score", "G2M_score"], n_jobs = cfg.options.worker_num)
+    if cfg.regression.enabled:
+        missing = [k for k in regress_keys if k not in scrna_hvgs.obs.columns]
+        if missing:
+            raise KeyError(f"Regression keys not found in obs: {missing}")
+        # end if statement
+        
+        print("Regressing out confounders.", flush = True)
+        sc.pp.regress_out(scrna_hvgs, keys = regress_keys, n_jobs = cfg.options.worker_num)
+    # end if statement
+    
     sc.pp.scale(scrna_hvgs)
     
     

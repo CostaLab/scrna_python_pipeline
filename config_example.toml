@@ -40,6 +40,15 @@
 "D_Csnk"  = "Csnk"
 
 
+# Regressing out possible confounders.
+[regression]
+# Set to false to skip regressing entirely.
+enabled = false
+# Covariates regressed out of the log-normalized HVG matrix before scaling.
+# Must be columns present in adata.obs. Leave empty or set enabled = false to skip.
+regress_out_keys = ["total_counts", "pct_counts_mito", "S_score", "G2M_score"]
+
+
 # Parameters: the parameters used in the pipeline.
 [options]
 # Where is your output supposed to go?
