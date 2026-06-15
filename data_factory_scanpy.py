@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os
 import sys
-from pydantic import BaseModel, field_validator, ValidationError
+from pydantic import BaseModel, field_validator, ValidationError, Field
 from pathlib import Path
 from typing import Dict, Literal # , Optional
 import math
@@ -74,10 +74,16 @@ class Options(BaseModel):
         return _str_inf_to_math_inf(v)
 
 
+class RegressionConfig(BaseModel):
+    enabled: bool = False
+    regress_out_keys: list[str] = Field(default_factory = list)
+
+
 class Config(BaseModel):
     phases: Dict[str, PhaseAction]
     data_src: Dict[str, Path]
     stage_lst: Dict[str, str]
+    regression: RegressionConfig = Field(default_factory = RegressionConfig)
     options: Options
     
     # Enforce known phase names.
@@ -178,8 +184,9 @@ cfg.options.pct_mito_floor   = check_numeric_or_inf(cfg.options.pct_mito_floor, 
 cfg.options.pct_ribo_ceiling = check_numeric_or_inf(cfg.options.pct_ribo_ceiling, "pct_ribo_ceiling")
 cfg.options.pct_ribo_floor   = check_numeric_or_inf(cfg.options.pct_ribo_floor, "pct_ribo_floor")
 
+
 # What are the variables we want to regress out?
-regress_keys = list(cfg.regression.keys)
+regress_keys = list(cfg.regression.regress_out_keys)
 if cfg.regression.enabled and len(regress_keys) == 0:
     sys.exit("Error: You want to regress out confounders, but you list is empty.")
 
