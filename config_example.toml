@@ -37,7 +37,7 @@
 "A_MxCre" = "MxCre"
 "B_MxCre" = "MxCre"
 "C_Csnk"  = "Csnk"
-"D_Csnk"  = "Csnk"
+"D_Csnk"  = "Dsnk"
 
 
 # Regressing out possible confounders.
