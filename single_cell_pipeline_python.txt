@@ -15,7 +15,7 @@ conda activate single_cell_pipeline_python
 conda install -c conda-forge \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn \
   bioconda::harmonypy python-igraph leidenalg statsmodels cython setuptools wheel bbknn conda-forge::polars cyvcf2 \
-  pyarrow conda-forge::pydantic numba tqdm -y
+  pyarrow conda-forge::pydantic numba tqdm openpyxl -y
 python -m pip install --no-cache-dir --force-reinstall scikit-misc scrublet xlsxwriter scib-metrics
 
 4) So, we can easily reconstruct the environment, I export it. Just to be save.

@@ -15,7 +15,7 @@ conda activate single_cell_pipeline_python_3_11
 conda install --strict-channel-priority -c conda-forge -c bioconda \
   numpy=1.24 pandas scanpy scikit-learn matplotlib seaborn pyyaml \
   harmonypy python-igraph leidenalg statsmodels cython setuptools wheel bbknn \
-  polars cyvcf2 pyarrow pydantic numba tqdm 'scvi-tools>=1.0' -y
+  polars cyvcf2 pyarrow pydantic numba tqdm 'scvi-tools>=1.0' openpyxl -y
 python -m pip install --no-cache-dir scikit-misc scrublet xlsxwriter scib-metrics
 
 4) Now, I add decontX-python. This is not part of the original pipeline, but become necessary after the demultiplexing of the
