@@ -30,3 +30,5 @@ conda list gives us a specific list of the packages with URL and exact build.
 
 conda env export -n single_cell_pipeline_python_3_11 --file single_cell_pipeline_python_3_11.yaml
 conda list --explicit -n single_cell_pipeline_python_3_11 > single_cell_pipeline_python_explicit_3_11.txt
+
+conda env export --no-builds | grep -v "^prefix: " > single_cell_pipeline_python_3_11_no_builds.yaml
