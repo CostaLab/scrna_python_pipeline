@@ -26,6 +26,7 @@ def _str_inf_to_math_inf(v):
 
 class Options(BaseModel):
     output: Path
+    organism: Literal["human", "mouse"]
     
     # QC
     min_cells: int | float
@@ -303,13 +304,16 @@ sample_names = list(cfg.stage_lst.keys())
 
 if cfg.phases.get("raw") == "skip":
     print("Skipping data loading.", flush = True)
+    
+    
 elif cfg.phases.get("raw") == "load":
     print("Loading the raw data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_raw_data.h5ad")):
         raise FileNotFoundError(f"scrna_raw_data not found: {cfg.options.output}scrna_raw_data.h5ad.")
-    # end if statement
     
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_raw_data.h5ad"))#, backed = "r+") # Backed is less memory intensive, but does not work. The matrix cannot be read by the QC functions.
+    
+    
 elif cfg.phases.get("raw") == "execute":
     print("Loading the data.", flush = True)
     print(sample_names[0], flush = True)
@@ -319,12 +323,10 @@ elif cfg.phases.get("raw") == "execute":
         for x in sample_names[1:]:
             print(x, flush = True)
             scrna.append(sc.read_10x_mtx(cfg.data_src[x], cache = False))
-        # end for loop
         
         scrna = ad.concat(scrna, label = "batch", keys = sample_names, index_unique = "-")
     else:
         scrna.obs["batch"] = sample_names[0]
-    # end if statement
     
     # Changing the names to have the form [SAMPLE]_[CELL_ID]-1.
     # This is done, because of tradition.
@@ -332,7 +334,6 @@ elif cfg.phases.get("raw") == "execute":
         f"{batch}_{cell_id.rsplit('-', 1)[0]}"
         for batch, cell_id in zip(scrna.obs["batch"], scrna.obs_names)
     ]
-    
     
     scrna.obs["stage"] = [cfg.stage_lst[x] for x in list(scrna.obs["batch"])]
     print("Saving the raw data.", flush = True)
@@ -349,7 +350,6 @@ elif cfg.phases.get("filter") == "load":
     print("Loading the filtered data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad")):
         raise FileNotFoundError(f"scrna_filtered_data not found: {cfg.options.output}scrna_filtered_data.h5ad.")
-    # end if statement
     
     scrna = sc.read_h5ad(os.path.join(cfg.options.output, "scrna_filtered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
@@ -361,7 +361,6 @@ elif cfg.phases.get("filter") == "execute":
     scrna.var["mito"] = scrna.var_names.str.upper().str.startswith("MT-")
     scrna.var["ribo"] = scrna.var_names.str.upper().str.match(r"^RP[SL]")
     sc.pp.calculate_qc_metrics(scrna, qc_vars = ["mito", "ribo"], percent_top = None, log1p = False, inplace = True)
-    
     
     qc_vars = ["total_counts", "n_genes_by_counts", "pct_counts_mito", "pct_counts_ribo"]
     y_labels = {
@@ -386,7 +385,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_raw.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    # end for loop
+    
     
     print("Filtering genes and cells.", flush = True)
     sc.pp.filter_cells(scrna, min_genes = cfg.options.min_genes)
@@ -398,14 +397,59 @@ elif cfg.phases.get("filter") == "execute":
     scrna = scrna[scrna.obs.pct_counts_ribo > cfg.options.pct_ribo_floor, :]
     
     
+    print("Checking if the cell cycle genes are present.", flush = True)
+    # This is done now before scrublet runs. This will detect an error early and save time.
+    # To reduce the number of files required to run the analysis, the cell cycle genes are saved here.
+    # They are from Regev Lab (regev_lab_cell_cycle_genes.txt)
+    cell_cycle_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7",
+                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
+                        "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B", "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1",
+                        "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2", "G2E3", "GAS2L3", "CBX5", "CENPA"]
+    s_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7", "POLD3",
+               "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8"]
+    g2m_genes = ["HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2", "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B",
+                 "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1", "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2",
+                 "G2E3", "GAS2L3", "CBX5", "CENPA"]
+    if cfg.options.organism == "mouse":
+        # MLF1IP, FAM64A and HN1 were renamed (Cenpu, Pimreg, Jpt1). Both symbols are listed; the missing one is dropped below.
+        s_genes = ["Mcm5", "Pcna", "Tyms", "Fen1", "Mcm2", "Mcm4", "Rrm1", "Ung", "Gins2", "Mcm6", "Cdca7", "Dtl", "Prim1", "Uhrf1", "Mlf1ip", "Cenpu", "Hells", "Rfc2", "Rpa2", "Nasp", "Rad51ap1", "Gmnn", "Wdr76", "Slbp", "Ccne2", "Ubr7", "Pold3",
+                   "Msh2", "Atad2", "Rad51", "Rrm2", "Cdc45", "Cdc6", "Exo1", "Tipin", "Dscc1", "Blm", "Casp8ap2", "Usp1", "Clspn", "Pola1", "Chaf1b", "Brip1", "E2f8"]
+        g2m_genes = ["Hmgb2", "Cdk1", "Nusap1", "Ube2c", "Birc5", "Tpx2", "Top2a", "Ndc80", "Cks2", "Nuf2", "Cks1b", "Mki67", "Tmpo", "Cenpf", "Tacc3", "Fam64a", "Pimreg", "Smc4", "Ccnb2", "Ckap2l", "Ckap2", "Aurkb", "Bub1", "Kif11", "Anp32e", "Tubb4b",
+                     "Gtse1", "Kif20b", "Hjurp", "Cdca3", "Hn1", "Jpt1", "Cdc20", "Ttk", "Cdc25c", "Kif2c", "Rangap1", "Ncapd2", "Dlgap5", "Cdca2", "Cdca8", "Ect2", "Kif23", "Hmmr", "Aurka", "Psrc1", "Anln", "Lbr", "Ckap5", "Cenpe", "Ctcf", "Nek2",
+                     "G2e3", "Gas2l3", "Cbx5", "Cenpa"]
+        cell_cycle_genes = s_genes + g2m_genes
+    
+    cell_cycle_genes = [x for x in cell_cycle_genes if x in scrna.var_names]
+    s_genes = [x for x in s_genes if x in scrna.var_names]
+    g2m_genes = [x for x in g2m_genes if x in scrna.var_names]
+    
+    if len(s_genes) == 0 or len(g2m_genes) == 0:
+        raise ValueError("Have no genes left for cell cycle calculation. Check if you are using the correct organism first.")
+    
+    
     print("Detecting doublets.", flush = True)
+    # scrublet needs 31 cells since it requires 30 PCs.
+    cells_per_batch = scrna.obs["batch"].value_counts()
+    small_batches = cells_per_batch[cells_per_batch < 31]
+    if len(small_batches) > 0:
+        raise ValueError(f"Scrublet needs at least 31 cells per batch. Batches too small after QC: {small_batches.to_dict()}")
+    
+    
     scrna.layers["counts"] = scrna.X.copy()
     doublet_scores = []
     for batch in scrna.obs["batch"].unique():
         adata_batch = scrna[scrna.obs["batch"] == batch]
+        if adata_batch.shape[0] < 31:
+            raise ValueError(f"Batch {batch} has only {adata_batch.shape[0]} cells. scrublet needs at least 31.")
+        
         counts_matrix = adata_batch.layers["counts"].toarray() if hasattr(adata_batch.layers["counts"], "toarray") else adata_batch.layers["counts"]
         scrub = scr.Scrublet(counts_matrix)
         scores, preds = scrub.scrub_doublets()
+        # Scrublet returns None if it cannot set the threshold automatically (no bimodal score distribution).
+        if preds is None:
+            print(f"Warning: Scrublet could not set a threshold automatically for {batch}. Using a fixed threshold of 0.25.", flush = True)
+            preds = scrub.call_doublets(threshold = 0.25)
+        
         scrna.obs.loc[adata_batch.obs_names, "scrublet_score"] = scores
         scrna.obs.loc[adata_batch.obs_names, "scrublet_predicted_doublet"] = preds
         scrub.set_embedding("UMAP", scr.get_umap(scrub.manifold_obs_, n_neighbors = 15, min_dist = 0.3))
@@ -421,7 +465,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{batch}_doublet_UMAP.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    # end for loop
+    
     
     print("Plotting the number of doublets per sample.", flush = True)
     doublet_counts = (
@@ -446,11 +490,16 @@ elif cfg.phases.get("filter") == "execute":
     if cfg.options.doublet_switch:
         print("Removing doublets.", flush = True)
         scrna = scrna[scrna.obs["scrublet_predicted_doublet"] == False, :].copy()
-    # end if statement
+    
     
     print("Filtering genes and cells after doublet removal.", flush = True)
     sc.pp.filter_cells(scrna, max_genes = cfg.options.max_genes)
     scrna = scrna[scrna.obs.total_counts < cfg.options.max_reads, :]
+    # Samples or stages whose cells were all filtered out must not remain as empty categories: empty groups make
+    # rank_genes_groups fail ("only contain one sample"). anndata already removes unused categories when subsetting
+    # (anndata.settings.remove_unused_categories, default True); these two lines make it independent of that setting.
+    scrna.obs["batch"] = scrna.obs["batch"].astype("category").cat.remove_unused_categories()
+    scrna.obs["stage"] = scrna.obs["stage"].astype("category").cat.remove_unused_categories()
     
     
     print("Generating QC figures after quality control.", flush = True)
@@ -466,7 +515,7 @@ elif cfg.phases.get("filter") == "execute":
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.pdf"), bbox_inches = "tight")
         plt.savefig(os.path.join(qc_dir, f"{var}_violin_filtered.png"), bbox_inches = "tight", dpi = cfg.options.figure_resolution_dpi)
         plt.close()
-    # end for loop
+    
     
     print("Log normalizing the data.", flush = True)
     sc.pp.normalize_total(scrna, target_sum = 1e4)
@@ -474,24 +523,10 @@ elif cfg.phases.get("filter") == "execute":
     scrna.layers["lognorm"] = scrna.X.copy()
     
     
-    print("Cell Cycle Scoring.", flush = True)
-    # To reduce the number of files required to run the analysis, the cell cycle genes are saved here.
-    # They are from Regev Lab (regev_lab_cell_cycle_genes.txt)
-    # Right now, they are only for humans. An implementation for mouse is necessary.
-    cell_cycle_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7",
-                        "POLD3", "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8", "HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2",
-                        "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B", "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1",
-                        "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2", "G2E3", "GAS2L3", "CBX5", "CENPA"]
-    s_genes = ["MCM5", "PCNA", "TYMS", "FEN1", "MCM2", "MCM4", "RRM1", "UNG", "GINS2", "MCM6", "CDCA7", "DTL", "PRIM1", "UHRF1", "MLF1IP", "HELLS", "RFC2", "RPA2", "NASP", "RAD51AP1", "GMNN", "WDR76", "SLBP", "CCNE2", "UBR7", "POLD3",
-               "MSH2", "ATAD2", "RAD51", "RRM2", "CDC45", "CDC6", "EXO1", "TIPIN", "DSCC1", "BLM", "CASP8AP2", "USP1", "CLSPN", "POLA1", "CHAF1B", "BRIP1", "E2F8"]
-    g2m_genes = ["HMGB2", "CDK1", "NUSAP1", "UBE2C", "BIRC5", "TPX2", "TOP2A", "NDC80", "CKS2", "NUF2", "CKS1B", "MKI67", "TMPO", "CENPF", "TACC3", "FAM64A", "SMC4", "CCNB2", "CKAP2L", "CKAP2", "AURKB", "BUB1", "KIF11", "ANP32E", "TUBB4B",
-                 "GTSE1", "KIF20B", "HJURP", "CDCA3", "HN1", "CDC20", "TTK", "CDC25C", "KIF2C", "RANGAP1", "NCAPD2", "DLGAP5", "CDCA2", "CDCA8", "ECT2", "KIF23", "HMMR", "AURKA", "PSRC1", "ANLN", "LBR", "CKAP5", "CENPE", "CTCF", "NEK2",
-                 "G2E3", "GAS2L3", "CBX5", "CENPA"]
-    cell_cycle_genes = [x for x in cell_cycle_genes if x in scrna.var_names]
-    s_genes = [x for x in s_genes if x in scrna.var_names]
-    g2m_genes = [x for x in g2m_genes if x in scrna.var_names]
+    print("Cell Cycle Scoring.", flush=True)
     sc.tl.score_genes_cell_cycle(scrna, s_genes = s_genes, g2m_genes = g2m_genes)
     scrna.obs["CC_difference"] = scrna.obs["S_score"] - scrna.obs["G2M_score"]
+    
     
     print("Saving the filtered data.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
@@ -505,11 +540,12 @@ elif cfg.phases.get("filter") == "execute":
 
 if cfg.phases.get("integration") == "skip":
     print("Skipping data integration.", flush = True)
+    
+    
 elif cfg.phases.get("integration") == "load":
     print("Loading the integrated data.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_integrated_data.h5ad")):
         raise FileNotFoundError(f"scrna_integrated_data not found: {cfg.options.output}scrna_integrated_data.h5ad.")
-    # end if statement
     
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_integrated_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
@@ -528,11 +564,9 @@ elif cfg.phases.get("integration") == "execute":
         missing = [k for k in regress_keys if k not in scrna_hvgs.obs.columns]
         if missing:
             raise KeyError(f"Regression keys not found in obs: {missing}")
-        # end if statement
         
         print("Regressing out confounders.", flush = True)
         sc.pp.regress_out(scrna_hvgs, keys = regress_keys, n_jobs = cfg.options.worker_num)
-    # end if statement
     
     sc.pp.scale(scrna_hvgs)
     
@@ -632,7 +666,6 @@ elif cfg.phases.get("cluster") == "load":
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_clustered_data.h5ad")):
         raise FileNotFoundError(f"scrna_clustered_data not found: {cfg.options.output}scrna_clustered_data.h5ad.")
     
-    
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_clustered_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
@@ -664,18 +697,29 @@ elif cfg.phases.get("cluster") == "execute":
 
 if cfg.phases.get("comparison") == "skip":
     print("Skipping data comparison.", flush = True)
+    
+    
 elif cfg.phases.get("comparison") == "load":
     print("Loading the data with comparison results.", flush = True)
     if not os.path.isfile(os.path.join(cfg.options.output, "scrna_comparison_data.h5ad")):
         raise FileNotFoundError(f"scrna_comparison_data not found: {cfg.options.output}scrna_comparison_data.h5ad.")
+    
     scrna = sc.read_h5ad(filename = os.path.join(cfg.options.output, "scrna_comparison_data.h5ad"))
     scrna.obs["scrublet_predicted_doublet"] = scrna.obs["scrublet_predicted_doublet_str"] == "True"
     del scrna.obs["scrublet_predicted_doublet_str"]
+    
+    
 elif cfg.phases.get("comparison") == "execute":
     print("Comparing clusters for marker genes.", flush = True)
     for res in np.arange(0.1, 0.9, 0.1):
         key_added = f"leiden_{res:.1f}"
         print(key_added, flush = True)
+        # scanpy's logreg fails with one group. With two groups, it returns results for one group only. The second group has the same results, just with inverted signs.
+        # See this bug report https://github.com/scverse/scanpy/pull/4348
+        if cfg.options.deg_method == "logreg" and scrna.obs[key_added].nunique() < 3:
+            print(f"Skipping {key_added}: with fewer than three groups, scanpy's logreg returns incomplete results (see scanpy pull request #4348). Use wilcoxon or t-test instead.", flush = True)
+            continue
+        
         deg_dir = os.path.join(cfg.options.output, f"degs_{key_added}")
         os.makedirs(deg_dir, exist_ok = True)
         writer = pd.ExcelWriter(os.path.join(deg_dir, f"{key_added}_degs.xlsx"), engine = "xlsxwriter")
@@ -684,6 +728,13 @@ elif cfg.phases.get("comparison") == "execute":
             print(f"Cluster: {cluster}", flush = True)
             result = sc.get.rank_genes_groups_df(scrna, group = cluster, key = f"degs_{key_added}")
             result.to_excel(writer, sheet_name = f"Cluster_{cluster}", index = False)
+            
+            # logreg only returns coefficients ("scores"): no log fold changes, no p-values.
+            # We rank by the coefficient and mark all genes as not significant, so the top 10 per direction are taken by coefficient.
+            # This happens after the Excel export, so the sheet only contains the real columns.
+            if cfg.options.deg_method == "logreg":
+                result["logfoldchanges"] = result["scores"]
+                result["pvals_adj"] = 1.0
             
             # Selecting the top 10 up regulated genes that are also statistically significant.
             sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
@@ -704,6 +755,9 @@ elif cfg.phases.get("comparison") == "execute":
             bar_colors = ["red"] * len(up_selected) + ["blue"] * len(down_selected)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
+            if cfg.options.deg_method == "logreg":
+                plt.xlabel("Logistic regression coefficient")
+            
             plt.title(f"Top DEGs for Cluster {cluster} ({key_added})")
             plt.tight_layout()
             plt.savefig(os.path.join(deg_dir, f"degs_{key_added}_cluster_{cluster}.pdf"), bbox_inches = "tight")
@@ -713,7 +767,11 @@ elif cfg.phases.get("comparison") == "execute":
     
     
     print("Comparing stages.", flush = True)
-    if(scrna.obs["stage"].nunique() > 1):
+    if cfg.options.deg_method == "logreg" and scrna.obs["stage"].nunique() < 3:
+        print("Skipping the stage comparison: with fewer than three groups, scanpy's logreg returns incomplete results (see scanpy pull request #4348). Use wilcoxon or t-test instead.", flush = True)
+        
+        
+    elif(scrna.obs["stage"].nunique() > 1):
         print("We compare the stages.", flush = True)
         stage_dir = os.path.join(cfg.options.output, "degs_stage")
         os.makedirs(stage_dir, exist_ok = True)
@@ -724,6 +782,11 @@ elif cfg.phases.get("comparison") == "execute":
             result = sc.get.rank_genes_groups_df(scrna, group = stage, key = "deg_genes_stage")
             result.to_excel(writer, sheet_name = f"Stage_{stage}", index = False)
             
+            # logreg only returns coefficients ("scores"): no log fold changes, no p-values. See the cluster loop above.
+            if cfg.options.deg_method == "logreg":
+                result["logfoldchanges"] = result["scores"]
+                result["pvals_adj"] = 1.0
+            
             # Selecting the top 10 up regulated genes that are also statistically significant.
             sig_up = result[(result["logfoldchanges"] > 0) & (result["pvals_adj"] < cfg.options.p_value_cutoff)].nlargest(10, "logfoldchanges")
             # If there are less than 10 sig_up genes, we fill up with non significant genes.
@@ -743,6 +806,9 @@ elif cfg.phases.get("comparison") == "execute":
             bar_colors = ["red"] * len(up_selected) + ["blue"] * len(down_selected)
             sns.barplot(x = "logfoldchanges", y = "names", data = top_genes, palette = bar_colors)
             plt.axvline(0, color = "gray", linestyle = "--")
+            if cfg.options.deg_method == "logreg":
+                plt.xlabel("Logistic regression coefficient")
+            
             plt.title(f"Top DEGs for Stage {stage}")
             plt.tight_layout()
             plt.savefig(os.path.join(stage_dir, f"degs_stage_{stage}.pdf"), bbox_inches = "tight")
@@ -750,8 +816,8 @@ elif cfg.phases.get("comparison") == "execute":
             plt.close()
         writer.close()
     
+    
     print("Save the comparison object.", flush = True)
     scrna.obs["scrublet_predicted_doublet_str"] = scrna.obs["scrublet_predicted_doublet"].astype(str)
     del scrna.obs["scrublet_predicted_doublet"]
     scrna.write_h5ad(filename = os.path.join(cfg.options.output, "scrna_comparison_data.h5ad"))
-
